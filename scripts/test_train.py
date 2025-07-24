@@ -4,7 +4,8 @@ import pytorch_lightning as pl
 from dotenv import load_dotenv
 
 def main(): 
-    dit = DiTModule() 
+    dit = DiTModule(quant_type="tsvdlinear", quant_args={"rank": 192}) 
+    print(dit.transformer)
     datamodule = ImageNetDataModule(batch_size=2)
     datamodule.setup()
 

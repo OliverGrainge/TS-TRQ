@@ -1,0 +1,6 @@
+*.pyc
+tmp/
+wandb/
+checkpoints/
+data/
+.env

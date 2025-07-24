@@ -1,10 +1,12 @@
 import os
 from dotenv import load_dotenv
-from diffusers import DiTPipeline
-from huggingface_hub import hf_hub_download
+
 
 # Load environment variables from .env file
 load_dotenv()
+
+from diffusers import DiTPipeline
+from huggingface_hub import hf_hub_download
 
 # Optionally use a HuggingFace token from the environment
 hf_token = os.getenv("HF_TOKEN")
@@ -13,6 +15,9 @@ hf_token = os.getenv("HF_TOKEN")
 cache_dir = os.getenv("HF_HUB_CACHE", None)
 
 print("Downloading DiT-XL-2-256 model from HuggingFace...")
+
+# Print out where the model will be downloaded before starting
+print(f"Model will be downloaded to the custom cache directory: {cache_dir}")
 
 # Download the model weights and config
 pipe = DiTPipeline.from_pretrained(
