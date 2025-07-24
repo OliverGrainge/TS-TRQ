@@ -1,3 +1,7 @@
+from dotenv import load_dotenv 
+
+load_dotenv()
+
 from models import DiTModule 
 from quant import quantize, linear_layer_names
 import torch
@@ -11,7 +15,7 @@ def main():
 
     linear_names = linear_layer_names(model.transformer)
 
-    model.transformer = quantize(model.transformer, layer_names=linear_names, quant_type="tsvdlinear", rank=192)
+    model.transformer = quantize(model.transformer, layer_names=linear_names, quant_type="tsvdlinear", rank=512)
     model.transformer = model.transformer.to(device)
 
     img = model.sample(batch_size=1, class_labels=[10], num_steps=50, device=device, output_type="pil")

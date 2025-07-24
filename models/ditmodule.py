@@ -115,11 +115,11 @@ class DiTModule(pl.LightningModule):
 
         # CFG drop
         #drop = torch.rand(latents.size(0), device=latents.device) < self.p_uncond
-        cond_labels = labels.clone()
+        #cond_labels = labels.clone()
         #cond_labels[drop] = None
 
-        pred, logvar = self(noisy_latents, t, y=cond_labels)
-        print(pred.isnan().any())
+        pred, logvar = self(noisy_latents, t, y=labels)
+        print(pred.isnan().any().item())
         loss = F.mse_loss(pred, noise, reduction="mean")
         #print(loss)
         rloss = self.reg_scale * self.reg_loss()

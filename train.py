@@ -2,6 +2,11 @@
 import argparse
 import pytorch_lightning as pl
 from dotenv import load_dotenv
+import torch 
+
+load_dotenv()
+torch.set_float32_matmul_precision("high")
+
 from models import DiTModule 
 from data import ImageNetDataModule
 
@@ -63,5 +68,4 @@ def main():
     trainer.fit(dit, train_loader, val_loader)
 
 if __name__ == "__main__":
-    load_dotenv()
     main()
