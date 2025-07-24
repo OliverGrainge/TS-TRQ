@@ -16,7 +16,7 @@ import numpy as np
 
 class DiTModule(pl.LightningModule):
     def __init__(self, model_name="dit-xl-2-256", learning_rate=1e-4,
-                 quant_type=None, quant_args=None, reg_scale=0.2):
+                 quant_type=None, quant_args=None, reg_scale=0.5):
         super().__init__()
         if quant_args is None: quant_args = {}
         self.save_hyperparameters()
@@ -115,7 +115,6 @@ class DiTModule(pl.LightningModule):
         loss = F.mse_loss(pred, noise, reduction="mean")
         rloss = self.reg_scale * self.reg_loss()
         total = loss + rloss
-        print("=======", loss.item(), rloss.item())
         self.log_dict({"train_loss": loss, "reg_loss": rloss, "total_loss": total},
                       on_step=True, prog_bar=True)
         return total

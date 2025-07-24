@@ -12,13 +12,13 @@ from data import ImageNetDataModule
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train DiT on ImageNet with PyTorch Lightning")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for training")
-    parser.add_argument("--max_epochs", type=int, default=10, help="Number of epochs to train")
+    parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training")
+    parser.add_argument("--max_epochs", type=int, default=20, help="Number of epochs to train")
     parser.add_argument("--accumulate_grad_batches", type=int, default=4, help="Gradient accumulation steps")
     parser.add_argument("--precision", type=int, default=32, help="Precision (16, 32, etc.)")
     parser.add_argument("--project", type=str, default="dit-imagenet", help="wandb project name")
-    parser.add_argument("--learning_rate", type=float, default=1e-7, help="Learning rate")
-    parser.add_argument("--reg_scale", type=float, default=0.2, help="Regularization scale")
+    parser.add_argument("--learning_rate", type=float, default=1e-6, help="Learning rate")
+    parser.add_argument("--reg_scale", type=float, default=0.5, help="Regularization scale")
     parser.add_argument("--quant_type", type=str, default="tsvdlinear", help="Quantization type")
     parser.add_argument("--quant_rank", type=int, default=192, help="Quantization rank")
     parser.add_argument("--save_dir", type=str, default="checkpoints", help="Directory to save checkpoints")
@@ -57,7 +57,7 @@ def main():
         max_epochs=args.max_epochs,
         callbacks=[checkpoint_callback],
         logger=wandb_logger,
-        log_every_n_steps=100,
+        log_every_n_steps=5,
         precision=args.precision,
         accumulate_grad_batches=args.accumulate_grad_batches,
         accelerator=args.accelerator,
