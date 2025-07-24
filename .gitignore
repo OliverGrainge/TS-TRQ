@@ -2,5 +2,5 @@
 tmp/
 wandb/
 checkpoints/
-data/
 .env
+data/raw/
