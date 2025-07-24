@@ -11,13 +11,12 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from diffusers import DDPMScheduler
-from torch_ema import ExponentialMovingAverage
 from PIL import Image
 import numpy as np
 
 class DiTModule(pl.LightningModule):
-    def __init__(self, model_name="dit-xl-2-256", learning_rate=1e-7,
-                 quant_type=None, quant_args=None, reg_scale=0.2, p_uncond=0.1):
+    def __init__(self, model_name="dit-xl-2-256", learning_rate=1e-4,
+                 quant_type=None, quant_args=None, reg_scale=0.2):
         super().__init__()
         if quant_args is None: quant_args = {}
         self.save_hyperparameters()
@@ -38,10 +37,9 @@ class DiTModule(pl.LightningModule):
         self.scaling_factor = getattr(self.vae.config, "scaling_factor", 0.18215)
         self.learning_rate = learning_rate
         self.reg_scale = reg_scale
-        self.p_uncond = p_uncond
 
-        #if quant_type is not None:
-        #    self._quantize_transformer(quant_type, quant_args)
+        if quant_type is not None:
+            self._quantize_transformer(quant_type, quant_args)
 
 
     def _quantize_transformer(self, quant_type, quant_args):
@@ -113,18 +111,11 @@ class DiTModule(pl.LightningModule):
         
         noisy_latents = self.scheduler.add_noise(latents, noise, t)
 
-        # CFG drop
-        #drop = torch.rand(latents.size(0), device=latents.device) < self.p_uncond
-        #cond_labels = labels.clone()
-        #cond_labels[drop] = None
-
         pred, logvar = self(noisy_latents, t, y=labels)
-        print(pred.isnan().any().item())
         loss = F.mse_loss(pred, noise, reduction="mean")
-        #print(loss)
         rloss = self.reg_scale * self.reg_loss()
-        total = loss
-
+        total = loss + rloss
+        print("=======", loss.item(), rloss.item())
         self.log_dict({"train_loss": loss, "reg_loss": rloss, "total_loss": total},
                       on_step=True, prog_bar=True)
         return total
