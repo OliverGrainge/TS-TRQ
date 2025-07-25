@@ -20,22 +20,24 @@ class CIFAR100DataModule(pl.LightningDataModule):
         self.data_dir = data_dir
         self.download = download
 
-        # Enhanced transforms for better accuracy
+        # The transforms are NOT in the correct order.
+        # Resize should come BEFORE ToTensor, because ToTensor expects a PIL image, but Resize only works on PIL images (not tensors).
+        # The correct order is: augmentations (on PIL), Resize (on PIL), ToTensor, Normalize (on tensor).
         train_transform = [
             transforms.RandomCrop(32, padding=4),  # Random crop with padding
-            transforms.RandomHorizontalFlip(p=0.5),
-            transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-            transforms.RandomRotation(15),
+            transforms.RandomHorizontalFlip(p=0.2),
+            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+            transforms.Resize((224, 224)),  # <-- Move Resize before ToTensor
             transforms.ToTensor(),
-            # Use CIFAR-100 specific normalization
-            transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], 
-                               std=[0.2675, 0.2565, 0.2761]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], 
+                                 std=[0.5, 0.5, 0.5]),
         ]
         
         val_transform = [
+            transforms.Resize((224, 224)),  # <-- Move Resize before ToTensor
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], 
-                               std=[0.2675, 0.2565, 0.2761]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], 
+                                 std=[0.5, 0.5, 0.5]),
         ]
         
         self.train_transform = transforms.Compose(train_transform)

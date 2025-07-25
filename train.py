@@ -13,7 +13,7 @@ torch.set_float32_matmul_precision("high")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train DiT on ImageNet with PyTorch Lightning")
-    parser.add_argument("--module", type=str, default="dit", choices=["dit", "mlp"], help="choose the trainer type")
+    parser.add_argument("--module", type=str, default="dit", choices=["dit", "mlp", "vit"], help="choose the trainer type")
     parser.add_argument("--dataset", type=str, default="imagenet", choices=["imagenet", "cifar100"], help="choose the model name")
     parser.add_argument("--checkpoint", type=str, default=None, help="choose a checkpoint to load from")
     parser.add_argument("--batch_size", type=int, default=8, help="Batch size for training")
@@ -45,6 +45,12 @@ def get_module(args, kwargs, checkpoint_path):
             return MLPModule.load_from_checkpoint(checkpoint_path, **kwargs)
         else: 
             return MLPModule(**kwargs)
+    elif args.module == "vit":
+        from models import ViTModule
+        if checkpoint_path is not None:
+            return ViTModule.load_from_checkpoint(checkpoint_path, **kwargs)
+        else: 
+            return ViTModule(**kwargs)
     else:
         raise ValueError(f"Invalid module: {args.module}")
 

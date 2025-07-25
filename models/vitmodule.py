@@ -3,34 +3,52 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from quant import quantize
+from transformers import ViTForImageClassification, ViTConfig
 
 
-class MLPModule(pl.LightningModule):
-    def __init__(self, input_size=3*32*32, hidden_sizes=[2048, 1024, 512, 256], num_classes=100,
-                 learning_rate=2e-3, dropout_rate=0.3, reg_scale=0.5):
+class ViTModule(pl.LightningModule):
+    def __init__(self, model_name="Ahmed9275/Vit-Cifar100", num_classes=100,
+                 learning_rate=2e-3, reg_scale=0.5, image_size=224, 
+                 patch_size=16, num_channels=3):
         super().__init__()
         self.save_hyperparameters()
         
-        self.input_size = input_size
         self.num_classes = num_classes
         self.learning_rate = learning_rate
         self.reg_scale = reg_scale
+        self.model_name = model_name
         
-        # Build MLP layers
-        layers = []
-        prev_size = input_size
-        
-        for i, hidden_size in enumerate(hidden_sizes):
-            layers.append(nn.Linear(prev_size, hidden_size))
-            layers.append(nn.GELU())  # Instead of nn.ReLU()
-            if dropout_rate > 0:
-                layers.append(nn.Dropout(dropout_rate))
-            prev_size = hidden_size
-        
-        # Output layer
-        layers.append(nn.Linear(prev_size, num_classes))
-        
-        self.mlp = nn.Sequential(*layers)
+        # Load pre-trained ViT model or create a new one
+        try:
+            print(f"Loading pre-trained model: {model_name}")
+            self.vit = ViTForImageClassification.from_pretrained(model_name)
+            print(f"Successfully loaded pre-trained model with {self.vit.config.num_labels} classes")
+            
+            # Adjust classifier if needed
+            if self.vit.config.num_labels != num_classes:
+                print(f"Adjusting classifier head from {self.vit.config.num_labels} to {num_classes} classes")
+                self.vit.classifier = nn.Linear(self.vit.config.hidden_size, num_classes)
+                
+        except Exception as e:
+            print(f"Could not load pre-trained model {model_name}: {e}")
+            print("Creating new ViT model from scratch...")
+            
+            # Create new ViT configuration
+            config = ViTConfig(
+                image_size=image_size,
+                patch_size=patch_size,
+                num_channels=num_channels,
+                num_labels=num_classes,
+                hidden_size=768,
+                num_hidden_layers=12,
+                num_attention_heads=12,
+                intermediate_size=3072,
+                hidden_dropout_prob=0.1,
+                attention_probs_dropout_prob=0.1,
+            )
+            
+            self.vit = ViTForImageClassification(config)
+            print(f"Created new ViT model with {num_classes} classes")
         
         # Track quantization state
         self.is_quantized = False
@@ -56,7 +74,7 @@ class MLPModule(pl.LightningModule):
         
         # Get linear layer names for quantization
         layer_names = self._get_quant_layer_names()
-        self.mlp = quantize(self.mlp, layer_names=layer_names,
+        self.vit = quantize(self.vit, layer_names=layer_names,
                            quant_type=quant_type, **quant_kwargs)
         
         # Update quantization state
@@ -67,16 +85,24 @@ class MLPModule(pl.LightningModule):
         print(f"Quantization applied successfully.")
 
     def _get_quant_layer_names(self):
-        # Return names of all linear layers for quantization
-        return [name for name, module in self.mlp.named_modules() 
-                if isinstance(module, nn.Linear)]
+        """Get names of linear layers that can be quantized"""
+        layer_names = []
+        for name, module in self.vit.named_modules():
+            if isinstance(module, nn.Linear):
+                # Include attention and MLP linear layers, but typically exclude the final classifier
+                if any(key in name for key in ['query', 'key', 'value', 'dense', 'intermediate']):
+                    layer_names.append(name)
+        return layer_names
     
     def forward(self, x):
-        # Flatten the input if it's an image tensor
-        if x.dim() > 2:
-            x = x.view(x.size(0), -1)
-
-        return self.mlp(x)
+        """Forward pass through the ViT model"""
+        # ViT expects images in (batch_size, channels, height, width) format
+        # For CIFAR-100, we might need to resize from 32x32 to 224x224
+        if x.shape[-1] == 32:  # CIFAR-100 size
+            x = F.interpolate(x, size=224, mode='bilinear', align_corners=False)
+        
+        outputs = self.vit(x)
+        return outputs.logits
     
     def reg_loss(self, reduction="mean"):
         """Compute regularization loss from quantized layers"""
@@ -84,7 +110,7 @@ class MLPModule(pl.LightningModule):
             return torch.tensor(0.0, device=self.device)
             
         losses = []
-        for m in self.mlp.modules():
+        for m in self.vit.modules():
             fn = getattr(m, "layer_reg_loss", None)
             if callable(fn):
                 losses.append(fn())
@@ -118,7 +144,7 @@ class MLPModule(pl.LightningModule):
             "train_loss": loss,
             "total_loss": total_loss,
             "train_acc": acc,
-            "learning_rate": current_lr  # Add learning rate logging
+            "learning_rate": current_lr
         }
         
         # Only log reg_loss if model is quantized
@@ -168,63 +194,64 @@ class MLPModule(pl.LightningModule):
         return {"test_loss": loss, "test_acc": acc}
     
     def configure_optimizers(self):
+        """Configure optimizer for ViT training"""
         optimizer = torch.optim.AdamW(
-            self.mlp.parameters(),
+            self.vit.parameters(),
             lr=self.learning_rate,
             weight_decay=1e-4,
             betas=(0.9, 0.999),
             eps=1e-8
         )
 
+        # Optional: Add learning rate scheduler
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        #     optimizer, T_max=self.trainer.max_epochs if hasattr(self, "trainer") and self.trainer is not None else 100, eta_min=1e-6
+        # )
+        
+        # return {
+        #     "optimizer": optimizer,
+        #     "lr_scheduler": {
+        #         "scheduler": scheduler,
+        #         "monitor": "val_loss",
+        #     }
+        # }
+        
         return optimizer
-        
-        # Add learning rate scheduler
-        #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-         #   optimizer, T_max=self.trainer.max_epochs if hasattr(self, "trainer") and self.trainer is not None else 100, eta_min=1e-6
-        #)
-        
-        #return {
-        #    "optimizer": optimizer,
-       #     "lr_scheduler": {
-        #        "scheduler": scheduler,
-        #        "monitor": "val_loss",
-        #    }
-        #}
 
 
 if __name__ == "__main__":
     # Example usage
-    mlp = MLPModule(
-        input_size=3*32*32,  # CIFAR-100 image size
-        hidden_sizes=[512, 256, 128],
-        num_classes=100,  # CIFAR-100 classes
-        learning_rate=1e-3
+    print("=== Creating ViT Module ===")
+    vit_model = ViTModule(
+        model_name="Ahmed9275/Vit-Cifar100",
+        num_classes=100,
+        learning_rate=1e-4
     )
     
-    # Test with dummy data
+    # Test with dummy CIFAR-100 data
     batch_size = 4
-    dummy_images = torch.randn(batch_size, 3, 32, 32)
+    dummy_images = torch.randn(batch_size, 3, 32, 32)  # CIFAR-100 size
     dummy_labels = torch.randint(0, 100, (batch_size,))
     
-    print("=== Full Precision Model ===")
+    print("\n=== Full Precision Model ===")
     # Forward pass (full precision)
-    logits = mlp(dummy_images)
+    logits = vit_model(dummy_images)
     print(f"Input shape: {dummy_images.shape}")
     print(f"Output shape: {logits.shape}")
-    print(f"Model parameters: {sum(p.numel() for p in mlp.parameters()):,}")
-    print(f"Is quantized: {mlp.is_quantized}")
+    print(f"Model parameters: {sum(p.numel() for p in vit_model.parameters()):,}")
+    print(f"Is quantized: {vit_model.is_quantized}")
     
     # Apply quantization
     print("\n=== Applying Quantization ===")
-    mlp.apply_quantization("tsvdlinear", {"rank": 8})
+    vit_model.apply_quantization("tsvdlinear", {"rank": 8})
     
     # Test quantized model
     print("\n=== Quantized Model ===")
-    logits_quant = mlp(dummy_images)
+    logits_quant = vit_model(dummy_images)
     print(f"Output shape after quantization: {logits_quant.shape}")
-    print(f"Is quantized: {mlp.is_quantized}")
-    print(f"Quantization type: {mlp.quant_type}")
-    print(f"Quantization args: {mlp.quant_kwargs}")
+    print(f"Is quantized: {vit_model.is_quantized}")
+    print(f"Quantization type: {vit_model.quant_type}")
+    print(f"Quantization args: {vit_model.quant_kwargs}")
     
     # Compare outputs
     diff = (logits - logits_quant).abs().mean()
@@ -233,7 +260,17 @@ if __name__ == "__main__":
     print("\n=== Usage Example for Checkpoint Loading ===")
     print("# 1. Train unquantized model and save checkpoint")
     print("# 2. Load checkpoint:")
-    print("model = MLPModule.load_from_checkpoint('checkpoint.ckpt')")
+    print("model = ViTModule.load_from_checkpoint('checkpoint.ckpt')")
     print("# 3. Apply quantization:")
     print("model.apply_quantization('tsvdlinear', {'rank': 8})")
     print("# 4. Continue training or inference with quantized model")
+    
+    print("\n=== Alternative: Create from scratch ===")
+    print("# Create a new ViT model from scratch:")
+    vit_scratch = ViTModule(
+        model_name="new_model",  # This will create a new model
+        num_classes=100,
+        learning_rate=1e-4,
+        image_size=224,
+        patch_size=16
+    )
