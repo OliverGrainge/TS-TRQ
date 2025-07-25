@@ -52,7 +52,7 @@ class ImageNetDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             collate_fn=self._collate_fn
         )
 
@@ -62,6 +62,6 @@ class ImageNetDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             collate_fn=self._collate_fn
         )

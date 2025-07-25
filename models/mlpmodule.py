@@ -6,8 +6,8 @@ from quant import quantize
 
 
 class MLPModule(pl.LightningModule):
-    def __init__(self, input_size=3*32*32, hidden_sizes=[512, 256, 128], num_classes=100,
-                 learning_rate=1e-3, dropout_rate=0.2, reg_scale=0.5):
+    def __init__(self, input_size=3*32*32, hidden_sizes=[2048, 1024, 512, 256], num_classes=100,
+                 learning_rate=2e-3, dropout_rate=0.3, reg_scale=0.5):
         super().__init__()
         self.save_hyperparameters()
         
@@ -22,7 +22,7 @@ class MLPModule(pl.LightningModule):
         
         for i, hidden_size in enumerate(hidden_sizes):
             layers.append(nn.Linear(prev_size, hidden_size))
-            layers.append(nn.ReLU())
+            layers.append(nn.GELU())  # Instead of nn.ReLU()
             if dropout_rate > 0:
                 layers.append(nn.Dropout(dropout_rate))
             prev_size = hidden_size
@@ -75,6 +75,7 @@ class MLPModule(pl.LightningModule):
         # Flatten the input if it's an image tensor
         if x.dim() > 2:
             x = x.view(x.size(0), -1)
+
         return self.mlp(x)
     
     def reg_loss(self, reduction="mean"):
@@ -120,7 +121,7 @@ class MLPModule(pl.LightningModule):
         if self.is_quantized:
             log_dict["reg_loss"] = rloss
             
-        self.log_dict(log_dict, on_step=True, prog_bar=True)
+        self.log_dict(log_dict, on_step=True, prog_bar=False)
         
         return total_loss
     
@@ -171,7 +172,18 @@ class MLPModule(pl.LightningModule):
             eps=1e-8
         )
         
-        return optimizer
+        # Add learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=self.trainer.max_epochs if hasattr(self, "trainer") and self.trainer is not None else 100, eta_min=1e-6
+        )
+        
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss",
+            }
+        }
 
 
 if __name__ == "__main__":

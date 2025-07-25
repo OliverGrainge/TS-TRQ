@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--project", type=str, default="dit-imagenet", help="wandb project name")
     parser.add_argument("--learning_rate", type=float, default=1e-6, help="Learning rate")
     parser.add_argument("--reg_scale", type=float, default=0.5, help="Regularization scale")
-    parser.add_argument("--quant_type", type=str, default="tsvdlinear", choices=["tsvdlinear", "trqlinear", "nbitlinear", "none"], help="Quantization type")
+    parser.add_argument("--quant_type", type=str, default="none", choices=["tsvdlinear", "trqlinear", "nbitlinear", "none"], help="Quantization type")
     parser.add_argument("--quant_rank", type=int, default=192, help="Quantization rank")
     parser.add_argument("--save_dir", type=str, default="checkpoints", help="Directory to save checkpoints")
     parser.add_argument("--devices", type=str, default="1", help="Number of GPUs or comma separated list of GPU ids (e.g., '0,1')")
