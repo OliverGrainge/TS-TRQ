@@ -1,7 +1,8 @@
 import pytorch_lightning as pl
 import torch
 from torch.utils.data import DataLoader
-from torchvision import transforms, datasets
+from torchvision import datasets, transforms
+
 
 class CIFAR100DataModule(pl.LightningDataModule):
     def __init__(
@@ -26,20 +27,20 @@ class CIFAR100DataModule(pl.LightningDataModule):
         train_transform = [
             transforms.RandomCrop(32, padding=4),  # Random crop with padding
             transforms.RandomHorizontalFlip(p=0.2),
-            transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05),
+            transforms.ColorJitter(
+                brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05
+            ),
             transforms.Resize((224, 224)),  # <-- Move Resize before ToTensor
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], 
-                                 std=[0.5, 0.5, 0.5]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ]
-        
+
         val_transform = [
             transforms.Resize((224, 224)),  # <-- Move Resize before ToTensor
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], 
-                                 std=[0.5, 0.5, 0.5]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ]
-        
+
         self.train_transform = transforms.Compose(train_transform)
         self.val_transform = transforms.Compose(val_transform)
 

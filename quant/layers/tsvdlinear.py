@@ -2,19 +2,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 # ---------- TERNARY QUANT WITH STE ----------
 def ternary_quantize(w: torch.Tensor, thresh_ratio: float = 0.75):
-    abs_w  = w.abs()
-    delta  = thresh_ratio * abs_w.mean()
-    mask   = (abs_w > delta).to(w.dtype)
+    abs_w = w.abs()
+    delta = thresh_ratio * abs_w.mean()
+    mask = (abs_w > delta).to(w.dtype)
     q_nograd = torch.sign(w) * mask
     nonzeros = mask.sum()
-    alpha    = (abs_w * mask).sum() / nonzeros.clamp(min=1)
+    alpha = (abs_w * mask).sum() / nonzeros.clamp(min=1)
 
     return q_nograd, alpha, mask, delta
 
+
 def ste_hard_replace(x_cont: torch.Tensor, x_disc_nograd: torch.Tensor):
     return x_cont + (x_disc_nograd - x_cont).detach()
+
 
 class TSVDLinear(nn.Linear):
     def __init__(self, in_features, out_features, bias=True, rank=8, thresh_ratio=0.75):
@@ -31,8 +34,13 @@ class TSVDLinear(nn.Linear):
 
     @classmethod
     def from_linear(cls, lin: nn.Linear, rank=8, thresh_ratio=0.75):
-        mod = cls(lin.in_features, lin.out_features, bias=(lin.bias is not None),
-                  rank=rank, thresh_ratio=thresh_ratio)
+        mod = cls(
+            lin.in_features,
+            lin.out_features,
+            bias=(lin.bias is not None),
+            rank=rank,
+            thresh_ratio=thresh_ratio,
+        )
         with torch.no_grad():
             mod.weight.copy_(lin.weight)
             if lin.bias is not None:
@@ -48,7 +56,9 @@ class TSVDLinear(nn.Linear):
         # Ensure weight is finite before quantization
         if not torch.isfinite(self.weight).all():
             print(f"Warning: Non-finite weights detected in layer initialization")
-            self.weight.data = torch.where(torch.isfinite(self.weight), self.weight, torch.zeros_like(self.weight))
+            self.weight.data = torch.where(
+                torch.isfinite(self.weight), self.weight, torch.zeros_like(self.weight)
+            )
 
         q, alpha, _, _ = ternary_quantize(self.weight, self.thresh_ratio)
         E = self.weight - alpha * q
@@ -59,13 +69,27 @@ class TSVDLinear(nn.Linear):
             E = torch.where(torch.isfinite(E), E, torch.zeros_like(E))
 
         U, S, Vh = torch.linalg.svd(E, full_matrices=False)
-        
+
         # Check SVD results for NaN/Inf
-        if not (torch.isfinite(U).all() and torch.isfinite(S).all() and torch.isfinite(Vh).all()):
+        if not (
+            torch.isfinite(U).all()
+            and torch.isfinite(S).all()
+            and torch.isfinite(Vh).all()
+        ):
             print(f"Warning: SVD produced non-finite values, using zero initialization")
             r = min(self.rank, self.weight.shape[0], self.weight.shape[1])
-            L = torch.zeros(self.weight.shape[0], r, dtype=self.weight.dtype, device=self.weight.device)
-            R = torch.zeros(r, self.weight.shape[1], dtype=self.weight.dtype, device=self.weight.device)
+            L = torch.zeros(
+                self.weight.shape[0],
+                r,
+                dtype=self.weight.dtype,
+                device=self.weight.device,
+            )
+            R = torch.zeros(
+                r,
+                self.weight.shape[1],
+                dtype=self.weight.dtype,
+                device=self.weight.device,
+            )
         else:
             r = min(self.rank, S.numel())
             U_r = U[:, :r]
@@ -93,7 +117,7 @@ class TSVDLinear(nn.Linear):
         # Ensure low-rank buffers are on the correct device / dtype before using them
         L = self.L.to(device=x.device, dtype=x.dtype)
         R = self.R.to(device=x.device, dtype=x.dtype)
-        
+
         if self.rank > 0 and L.numel() != 0 and R.numel() != 0:
             E_lr = (self.lr_scalars.to(x.dtype) * L) @ R
             # Check for NaN in low-rank correction
@@ -118,13 +142,15 @@ class TSVDLinear(nn.Linear):
         return self.lr_scalars.abs().mean()
 
     def extra_repr(self):
-        return (f"in_features={self.in_features}, out_features={self.out_features}, "
-                f"bias={self.bias is not None}, rank={self.rank}, thresh_ratio={self.thresh_ratio}")
-    
+        return (
+            f"in_features={self.in_features}, out_features={self.out_features}, "
+            f"bias={self.bias is not None}, rank={self.rank}, thresh_ratio={self.thresh_ratio}"
+        )
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
+
     torch.manual_seed(0)
     lin = nn.Linear(128, 256, bias=True)
     tq = TSVDLinear.from_linear(lin, rank=8)  # set max rank

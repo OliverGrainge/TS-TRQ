@@ -1,24 +1,30 @@
-from dotenv import load_dotenv 
+from dotenv import load_dotenv
 
 load_dotenv()
 
-from models import DiTModule 
-from quant import quantize, linear_layer_names
 import torch
 
-def main(): 
+from models import DiTModule
+from quant import linear_layer_names, quantize
+
+
+def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
-    model = DiTModule() 
+    model = DiTModule()
     model = model.to(device)
 
     linear_names = linear_layer_names(model.transformer)
 
-    model.transformer = quantize(model.transformer, layer_names=linear_names, quant_type="tsvdlinear", rank=512)
+    model.transformer = quantize(
+        model.transformer, layer_names=linear_names, quant_type="tsvdlinear", rank=512
+    )
     model.transformer = model.transformer.to(device)
 
-    img = model.sample(batch_size=1, class_labels=[10], num_steps=50, device=device, output_type="pil")
+    img = model.sample(
+        batch_size=1, class_labels=[10], num_steps=50, device=device, output_type="pil"
+    )
 
     # model.sample returns a list of PIL images if output_type="pil"
     if isinstance(img, list):
@@ -28,4 +34,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()  
+    main()

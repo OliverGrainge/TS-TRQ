@@ -23,9 +23,9 @@ print("HF_HUB_CACHE:", HF_HUB_CACHE)
 # Instead, set the HF_TOKEN environment variable, which datasets will use automatically.
 
 # Enable trust_remote_code for loading datasets with custom code
-for split in ["train", "validation"]:
+for split in ["train", "test"]:
     ds = load_dataset(
-        "ILSVRC/imagenet-1k",
+        "cifar100",
         split=split,
         cache_dir=cache_dir,
         download_config=DownloadConfig(delete_extracted=True),

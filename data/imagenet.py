@@ -1,10 +1,10 @@
+import numpy as np
 import pytorch_lightning as pl
 import torch
 from datasets import load_dataset
 from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-import numpy as np
 
 
 class ImageNetDataModule(pl.LightningDataModule):
@@ -53,7 +53,7 @@ class ImageNetDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=torch.cuda.is_available(),
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
         )
 
     def val_dataloader(self):
@@ -63,5 +63,5 @@ class ImageNetDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=torch.cuda.is_available(),
-            collate_fn=self._collate_fn
+            collate_fn=self._collate_fn,
         )

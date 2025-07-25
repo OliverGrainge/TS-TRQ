@@ -1,6 +1,8 @@
 import os
-import torch
 from typing import Optional
+
+import torch
+
 
 def get_model(
     model_name: str,
