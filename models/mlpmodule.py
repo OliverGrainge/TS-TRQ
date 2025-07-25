@@ -110,11 +110,15 @@ class MLPModule(pl.LightningModule):
         preds = torch.argmax(logits, dim=1)
         acc = (preds == labels).float().mean()
         
+        # Get current learning rate from optimizer
+        current_lr = self.optimizers().param_groups[0]['lr']
+        
         # Log metrics
         log_dict = {
             "train_loss": loss,
             "total_loss": total_loss,
-            "train_acc": acc
+            "train_acc": acc,
+            "learning_rate": current_lr  # Add learning rate logging
         }
         
         # Only log reg_loss if model is quantized
