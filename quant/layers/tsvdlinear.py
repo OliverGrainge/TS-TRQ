@@ -6,12 +6,12 @@ import torch.nn.functional as F
 # ---------- TERNARY QUANT WITH STE ----------
 def ternary_quantize(w: torch.Tensor, thresh_ratio: float = 0.75):
     abs_w = w.abs()
-    delta = thresh_ratio * abs_w.mean()
+    # Per-channel (per output channel/row) quantization
+    delta = thresh_ratio * abs_w.mean(dim=1, keepdim=True)  # Shape: (out_features, 1)
     mask = (abs_w > delta).to(w.dtype)
     q_nograd = torch.sign(w) * mask
-    nonzeros = mask.sum()
-    alpha = (abs_w * mask).sum() / nonzeros.clamp(min=1)
-
+    nonzeros = mask.sum(dim=1, keepdim=True)  # Shape: (out_features, 1)
+    alpha = (abs_w * mask).sum(dim=1, keepdim=True) / nonzeros.clamp(min=1)  # Shape: (out_features, 1)
     return q_nograd, alpha, mask, delta
 
 
@@ -27,7 +27,8 @@ class TSVDLinear(nn.Linear):
 
         self.register_buffer("L", torch.zeros(out_features, rank))
         self.register_buffer("R", torch.zeros(rank, in_features))
-        self.alpha = nn.Parameter(torch.tensor(1.0))  # Make alpha learnable
+        # Make alpha per-channel (one scalar per output channel)
+        self.alpha = nn.Parameter(torch.ones(out_features, 1))
 
         # Layer-wise scalars for LR approximation
         self.lr_scalars = nn.Parameter(torch.ones(out_features, 1))
@@ -101,7 +102,8 @@ class TSVDLinear(nn.Linear):
 
         self.L = L.detach()
         self.R = R.detach()
-        self.alpha.data = alpha.detach()  # Initialize learnable alpha
+        # Initialize per-channel alpha - alpha already has shape (out_features, 1)
+        self.alpha.data = alpha.detach()
         self.lr_scalars.data.fill_(1.0)
 
     def forward(self, x):

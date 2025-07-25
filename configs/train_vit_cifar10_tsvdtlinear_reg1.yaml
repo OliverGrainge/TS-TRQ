@@ -23,4 +23,4 @@ strategy: "auto"  # "ddp", "dp", "auto"
 # Logging and checkpointing
 project: "vit-tsvdlinear"
 save_dir: "checkpoints"
-enable_progress_bar: false 
+enable_progress_bar: true
