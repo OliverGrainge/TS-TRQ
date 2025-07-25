@@ -79,7 +79,7 @@ def main():
     val_loader = datamodule.val_dataloader()
 
     wandb_logger = WandbLogger(
-        project=config.project + "_" + config.module, log_model=False
+        project=config.project, log_model=False
     )
 
     # Use pathlib for easier and more robust path handling
