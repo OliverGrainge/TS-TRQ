@@ -143,6 +143,10 @@ class TSVDLinear(nn.Linear):
     def layer_reg_loss(self):
         return self.lr_scalars.abs().mean()
 
+    def reset_lowrank(self, rank: int):
+        """Reset the low-rank approximation with a new rank"""
+        self._init_weights(rank=rank)
+
     def extra_repr(self):
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, "
