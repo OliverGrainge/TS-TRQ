@@ -49,5 +49,4 @@ def get_model(
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     pipe = pipe.to(device)
-
     return pipe
