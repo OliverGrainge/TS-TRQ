@@ -15,10 +15,9 @@ from PIL import Image
 import numpy as np
 
 class DiTModule(pl.LightningModule):
-    def __init__(self, model_name="dit-xl-2-256", learning_rate=1e-4,
-                 quant_type=None, quant_args=None, reg_scale=0.5):
+    def __init__(self, model_name="dit-xl-2-256", learning_rate=1e-4, reg_scale=0.5):
         super().__init__()
-        if quant_args is None: quant_args = {}
+        if quant_kwargs is None: quant_kwargs = {}
         self.save_hyperparameters()
 
         model = get_model(model_name)  # your helper
@@ -38,14 +37,36 @@ class DiTModule(pl.LightningModule):
         self.learning_rate = learning_rate
         self.reg_scale = reg_scale
 
-        if quant_type is not None:
-            self._quantize_transformer(quant_type, quant_args)
 
+    def apply_quantization(self, quant_type, quant_kwargs=None):
+        """
+        Apply quantization to the model after construction/loading.
+        
+        Args:
+            quant_type: Type of quantization to apply
+            quant_args: Arguments for quantization
+        """
+        if quant_kwargs is None:
+            quant_kwargs = {}
+            
+        if self.is_quantized:
+            print(f"Model is already quantized with {self.quant_type}. Skipping.")
+            return
+            
+        print(f"Applying {quant_type} quantization to model...")
+        
+        # Get linear layer names for quantization
+        layer_names = self._get_quant_layer_names()
+        self.transformer = quantize(self.transformer, layer_names=layer_names,
+                           quant_type=quant_type, **quant_kwargs)
+        
+        # Update quantization state
+        self.is_quantized = True
+        self.quant_type = quant_type
+        self.quant_kwargs = quant_kwargs
+        
+        print(f"Quantization applied successfully.")
 
-    def _quantize_transformer(self, quant_type, quant_args):
-        qs = self._get_quant_layer_names()
-        self.transformer = quantize(self.transformer, layer_names=qs,
-                                    quant_type=quant_type, **quant_args)
 
     def _get_quant_layer_names(self):
         return [n for n, _ in self.transformer.named_modules() if "ff" in n]
