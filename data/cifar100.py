@@ -26,13 +26,15 @@ class CIFAR100DataModule(pl.LightningDataModule):
         # The correct order is: augmentations (on PIL), Resize (on PIL), ToTensor, Normalize (on tensor).
         train_transform = [
             transforms.RandomCrop(32, padding=4),  # Random crop with padding
-            transforms.RandomHorizontalFlip(p=0.2),
+            transforms.RandomHorizontalFlip(p=0.5),  # Standard flip probability
+            transforms.RandomRotation(15),  # Small random rotation
             transforms.ColorJitter(
-                brightness=0.1, contrast=0.1, saturation=0.1, hue=0.05
+                brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
             ),
-            transforms.Resize((224, 224)),  # <-- Move Resize before ToTensor
+            transforms.Resize((224, 224)),  # Resize for ViT
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
+            transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),  # Regularization
         ]
 
         val_transform = [
