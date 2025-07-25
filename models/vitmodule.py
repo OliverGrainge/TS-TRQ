@@ -137,6 +137,61 @@ class ViTModule(pl.LightningModule):
         losses = torch.stack([torch.as_tensor(l, device=self.device) for l in losses])
         return losses.mean() if reduction == "mean" else losses.sum()
 
+    def lr_scalars_magnitude(self, reduction="mean"):
+        """Compute magnitude statistics of lr_scalars from TSVDLinear layers"""
+        if not self.is_quantized or self.quant_type != "tsvdlinear":
+            return torch.tensor(0.0, device=self.device)
+
+        magnitudes = []
+        for m in self.vit.modules():
+            # Check if this is a TSVDLinear layer by looking for lr_scalars attribute
+            if hasattr(m, "lr_scalars") and hasattr(m, "rank"):
+                # Get the magnitude of lr_scalars
+                mag = m.lr_scalars.abs()
+                magnitudes.append(mag.flatten())
+        
+        if not magnitudes:
+            return torch.tensor(0.0, device=self.device)
+        
+        # Concatenate all magnitudes and compute statistics
+        all_magnitudes = torch.cat(magnitudes)
+        if reduction == "mean":
+            return all_magnitudes.mean()
+        elif reduction == "max":
+            return all_magnitudes.max()
+        elif reduction == "std":
+            return all_magnitudes.std()
+        else:
+            return all_magnitudes.mean()
+
+    def ternary_vs_lr_ratio(self):
+        """Compute the ratio of ternary alpha magnitudes vs lr_scalars magnitudes"""
+        if not self.is_quantized or self.quant_type != "tsvdlinear":
+            return torch.tensor(1.0, device=self.device)
+
+        alpha_mags = []
+        lr_mags = []
+        
+        for m in self.vit.modules():
+            if hasattr(m, "lr_scalars") and hasattr(m, "alpha") and hasattr(m, "rank"):
+                # Get magnitudes
+                alpha_mag = m.alpha.abs().flatten()
+                lr_mag = m.lr_scalars.abs().flatten()
+                
+                alpha_mags.append(alpha_mag)
+                lr_mags.append(lr_mag)
+        
+        if not alpha_mags or not lr_mags:
+            return torch.tensor(1.0, device=self.device)
+        
+        # Compute mean magnitudes
+        mean_alpha = torch.cat(alpha_mags).mean()
+        mean_lr = torch.cat(lr_mags).mean()
+        
+        # Return ratio (ternary / low-rank)
+        # Higher ratio means ternary weights are doing more work
+        return mean_alpha / (mean_lr + 1e-8)
+
     def training_step(self, batch, batch_idx):
         images, labels = batch
 
@@ -168,6 +223,13 @@ class ViTModule(pl.LightningModule):
         # Only log reg_loss if model is quantized
         if self.is_quantized:
             log_dict["reg_loss"] = rloss
+            
+            # Log lr_scalars magnitude for tsvdlinear quantization
+            if self.quant_type == "tsvdlinear":
+                log_dict["lr_scalars_mean"] = self.lr_scalars_magnitude(reduction="mean")
+                log_dict["lr_scalars_max"] = self.lr_scalars_magnitude(reduction="max")
+                log_dict["lr_scalars_std"] = self.lr_scalars_magnitude(reduction="std")
+                log_dict["ternary_lr_ratio"] = self.ternary_vs_lr_ratio()
 
         self.log_dict(log_dict, on_step=True, prog_bar=False)
 
