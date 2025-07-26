@@ -26,6 +26,15 @@ def load_config(config_path: str) -> Dict[str, Any]:
     return config
 
 
+def flatten_dict(d, parent_key='', sep='/'):
+    items = []
+    for k, v in d.items():
+        new_key = f"{parent_key}{sep}{k}" if parent_key else k
+        if isinstance(v, dict):
+            items.extend(flatten_dict(v, new_key, sep=sep).items())
+        else:
+            items.append((new_key, v))
+    return dict(items)
 
 def get_module(module_config):
     module_type = module_config.pop("module", "vit")
@@ -104,7 +113,7 @@ def create_logger(logger_config, config_dict=None):
         logger = WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
         # Log the full configuration
         if config_dict is not None:
-            logger.log_hyperparams(config_dict)
+            logger.log_hyperparams(flatten_dict(config_dict))
         return logger
     else:
         raise ValueError(f"Unsupported logger type: {logger_type}")
