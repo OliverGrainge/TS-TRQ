@@ -1,0 +1,26 @@
+# Training configuration for DiT on ImageNet
+module: "vit"
+dataset: "cifar100"
+checkpoint: null  # Path to checkpoint to resume from, or null for training from scratch
+
+# Training hyperparameters
+batch_size: 128
+max_epochs: 30
+accumulate_grad_batches: 2
+learning_rate: 0.0001
+reg_scale: 1.0
+
+# Model quantization
+quant_type: "tsvdlinear"  # Options: "tsvdlinear", "trqlinear", "nbitlinear", "none"
+quant_rank: 4
+
+# Training setup
+precision: "bf16"  # 16 or 32
+accelerator: "gpu"  # "cpu", "gpu"
+devices: "1"  # Number of GPUs or comma-separated list like "0,1"
+strategy: "auto"  # "ddp", "dp", "auto"
+
+# Logging and checkpointing
+project: "vit-tsvdlinear"
+save_dir: "checkpoints"
+enable_progress_bar: true
