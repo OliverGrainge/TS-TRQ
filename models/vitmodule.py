@@ -96,6 +96,9 @@ class ViTModule(pl.LightningModule):
         self.quant_type = quant_type
         self.quant_kwargs = quant_kwargs
 
+        for name, param in self.quant_kwargs.items(): 
+            self.log(name, param)
+
         print(f"Quantization applied successfully.")
 
     def _get_quant_layer_names(self):
