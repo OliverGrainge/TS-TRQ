@@ -96,12 +96,16 @@ def create_model_checkpoint_callback(model_checkpoint_config):
     return ModelCheckpoint(**config)
 
 
-def create_logger(logger_config):
+def create_logger(logger_config, config_dict=None):
     """Create logger from configuration"""
     logger_type = logger_config.get("type", "wandb")
     
     if logger_type == "wandb":
-        return WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
+        logger = WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
+        # Log the full configuration
+        if config_dict is not None:
+            logger.log_hyperparameters(config_dict)
+        return logger
     else:
         raise ValueError(f"Unsupported logger type: {logger_type}")
 
@@ -140,7 +144,7 @@ def main():
     val_loader = datamodule.val_dataloader()
 
     # Create logger
-    logger = create_logger(logger_config)
+    logger = create_logger(logger_config, config_dict)
 
     # Create model checkpoint callback
     checkpoint_callback = create_model_checkpoint_callback(model_checkpoint_config)

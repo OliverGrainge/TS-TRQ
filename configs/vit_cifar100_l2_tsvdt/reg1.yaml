@@ -15,7 +15,7 @@ datamodule_config:
 
 # Training configuration - trainer-specific parameters
 train_config:
-  max_epochs: 20
+  max_epochs: 80
   accumulate_grad_batches: 4
   precision: bf16
   accelerator: "gpu"
@@ -35,8 +35,10 @@ model_checkpoint_config:
 # Logger configuration - logging parameters
 logger_config:
   type: "wandb"
-  project: "vit-tsvdlinear"
+  project: "vit"
+  save_dir: "/scratch/oeg1n18"
   log_model: false
+
 
 # Quantization configuration - quantization-specific parameters
 quantization_config:
