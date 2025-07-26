@@ -104,7 +104,7 @@ def create_logger(logger_config, config_dict=None):
         logger = WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
         # Log the full configuration
         if config_dict is not None:
-            logger.log_hyperparameters(config_dict)
+            logger.log_hyperparams(config_dict)
         return logger
     else:
         raise ValueError(f"Unsupported logger type: {logger_type}")

@@ -231,8 +231,6 @@ class ViTModule(pl.LightningModule):
         # Only log reg_loss if model is quantized
         if self.is_quantized:
             log_dict["reg_loss"] = rloss
-
-        print(loss.item(), rloss.item())
             
         # Log lr_scalars magnitude for tsvdlinear quantization
         log_dict["lr_scalars_mean"] = self.lr_scalars_magnitude(reduction="mean")
