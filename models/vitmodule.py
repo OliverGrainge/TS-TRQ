@@ -164,32 +164,41 @@ class ViTModule(pl.LightningModule):
             return all_magnitudes.mean()
 
     def ternary_vs_lr_ratio(self):
-        """Compute the ratio of ternary alpha magnitudes vs lr_scalars magnitudes"""
+        """
+        Estimate the relative contribution of the ternary (quantized) weights vs. the low-rank correction
+        in TSVDLinear layers, by comparing the mean absolute value of the ternary part (alpha * q)
+        to the mean absolute value of the low-rank correction (lr_scalars * L @ R).
+        """
         if not self.is_quantized or self.quant_type != "tsvdlinear":
             return torch.tensor(1.0, device=self.device)
 
-        alpha_mags = []
-        lr_mags = []
-        
+        ternary_vals = []
+        lowrank_vals = []
         for m in self.vit.modules():
-            if hasattr(m, "lr_scalars") and hasattr(m, "alpha") and hasattr(m, "rank"):
-                # Get magnitudes
-                alpha_mag = m.alpha.abs().flatten()
-                lr_mag = m.lr_scalars.abs().flatten()
-                
-                alpha_mags.append(alpha_mag)
-                lr_mags.append(lr_mag)
-        
-        if not alpha_mags or not lr_mags:
+            if hasattr(m, "alpha") and hasattr(m, "L") and hasattr(m, "R") and hasattr(m, "lr_scalars"):
+                # Recompute ternary quantization for current weights
+                with torch.no_grad():
+                    # Get quantized ternary weights (q) and alpha
+                    q_nograd, alpha, _, _ = m.ternary_quantize(m.weight, m.thresh_ratio) \
+                        if hasattr(m, "ternary_quantize") else \
+                        (torch.sign(m.weight), m.alpha, None, None)
+                    ternary_part = (alpha * q_nograd).abs()
+                    ternary_vals.append(ternary_part.flatten())
+
+                    # Compute low-rank correction: (lr_scalars * L) @ R
+                    L = m.L.to(device=self.device, dtype=self.dtype if hasattr(self, "dtype") else m.L.dtype)
+                    R = m.R.to(device=self.device, dtype=self.dtype if hasattr(self, "dtype") else m.R.dtype)
+                    lr_scalars = m.lr_scalars.to(device=self.device, dtype=self.dtype if hasattr(self, "dtype") else m.lr_scalars.dtype)
+                    if L.numel() > 0 and R.numel() > 0:
+                        lowrank = (lr_scalars * L) @ R
+                        lowrank_vals.append(lowrank.abs().flatten())
+
+        if not ternary_vals or not lowrank_vals:
             return torch.tensor(1.0, device=self.device)
-        
-        # Compute mean magnitudes
-        mean_alpha = torch.cat(alpha_mags).mean()
-        mean_lr = torch.cat(lr_mags).mean()
-        
-        # Return ratio (ternary / low-rank)
-        # Higher ratio means ternary weights are doing more work
-        return mean_alpha / (mean_lr + 1e-8)
+
+        mean_ternary = torch.cat(ternary_vals).mean()
+        mean_lowrank = torch.cat(lowrank_vals).mean()
+        return mean_ternary / (mean_lowrank + 1e-8)
 
     def training_step(self, batch, batch_idx):
         images, labels = batch
@@ -220,16 +229,16 @@ class ViTModule(pl.LightningModule):
         }
 
         # Only log reg_loss if model is quantized
-        print(loss.item(),rloss.item())
         if self.is_quantized:
             log_dict["reg_loss"] = rloss
+
+        print(loss.item(), rloss.item())
             
-            # Log lr_scalars magnitude for tsvdlinear quantization
-            if self.quant_type == "tsvdlinear":
-                log_dict["lr_scalars_mean"] = self.lr_scalars_magnitude(reduction="mean")
-                log_dict["lr_scalars_max"] = self.lr_scalars_magnitude(reduction="max")
-                log_dict["lr_scalars_std"] = self.lr_scalars_magnitude(reduction="std")
-                log_dict["ternary_lr_ratio"] = self.ternary_vs_lr_ratio()
+        # Log lr_scalars magnitude for tsvdlinear quantization
+        log_dict["lr_scalars_mean"] = self.lr_scalars_magnitude(reduction="mean")
+        log_dict["lr_scalars_max"] = self.lr_scalars_magnitude(reduction="max")
+        log_dict["lr_scalars_std"] = self.lr_scalars_magnitude(reduction="std")
+        log_dict["ternary_lr_ratio"] = self.ternary_vs_lr_ratio()
 
         self.log_dict(log_dict, on_step=True, prog_bar=False)
 
