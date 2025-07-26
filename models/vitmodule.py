@@ -13,7 +13,6 @@ class ViTModule(pl.LightningModule):
         model_name="Ahmed9275/Vit-Cifar100",
         num_classes=100,
         learning_rate=2e-3,
-        reg_scale=0.5,
         image_size=224,
         patch_size=16,
         num_channels=3,
@@ -23,7 +22,6 @@ class ViTModule(pl.LightningModule):
 
         self.num_classes = num_classes
         self.learning_rate = learning_rate
-        self.reg_scale = reg_scale
         self.model_name = model_name
 
         # Load pre-trained ViT model or create a new one
@@ -69,22 +67,23 @@ class ViTModule(pl.LightningModule):
         self.quant_type = None
         self.quant_kwargs = None
 
-    def apply_quantization(self, quant_type, quant_kwargs=None):
+    def apply_quantization(self, quant_type, **quant_kwargs):
         """
         Apply quantization to the model after construction/loading.
 
         Args:
             quant_type: Type of quantization to apply
-            quant_kwargs: Arguments for quantization
+            quant_kwargs: Additional keyword arguments for quantization
         """
-        if quant_kwargs is None:
-            quant_kwargs = {}
+        if quant_type is None or quant_type == "none":
+            print("No quantization type specified or quantization disabled. Skipping quantization.")
+            return
 
         if self.is_quantized:
             print(f"Model is already quantized with {self.quant_type}. Skipping.")
             return
 
-        print(f"Applying {quant_type} quantization to model...")
+        print(f"Applying {quant_type} quantization to model with kwargs: {quant_kwargs}")
 
         # Get linear layer names for quantization
         layer_names = self._get_quant_layer_names()
@@ -202,7 +201,7 @@ class ViTModule(pl.LightningModule):
         loss = F.cross_entropy(logits, labels)
 
         # Add regularization loss (only if quantized)
-        rloss = self.reg_scale * self.reg_loss()
+        rloss = self.reg_loss()
         total_loss = loss + rloss
 
         # Compute accuracy
@@ -221,6 +220,7 @@ class ViTModule(pl.LightningModule):
         }
 
         # Only log reg_loss if model is quantized
+        print(loss.item(),rloss.item())
         if self.is_quantized:
             log_dict["reg_loss"] = rloss
             

@@ -20,10 +20,12 @@ def ste_hard_replace(x_cont: torch.Tensor, x_disc_nograd: torch.Tensor):
 
 
 class TSVDLinear(nn.Linear):
-    def __init__(self, in_features, out_features, bias=True, rank=8, thresh_ratio=0.75):
+    def __init__(self, in_features, out_features, bias=True, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"):
         super().__init__(in_features, out_features, bias=bias)
         self.thresh_ratio = thresh_ratio
         self.rank = rank
+        self.reg_scale = reg_scale 
+        self.reg_type = reg_type
 
         self.register_buffer("L", torch.zeros(out_features, rank))
         self.register_buffer("R", torch.zeros(rank, in_features))
@@ -34,13 +36,15 @@ class TSVDLinear(nn.Linear):
         self.lr_scalars = nn.Parameter(torch.ones(out_features, 1))
 
     @classmethod
-    def from_linear(cls, lin: nn.Linear, rank=8, thresh_ratio=0.75):
+    def from_linear(cls, lin: nn.Linear, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"):
         mod = cls(
             lin.in_features,
             lin.out_features,
             bias=(lin.bias is not None),
             rank=rank,
             thresh_ratio=thresh_ratio,
+            reg_scale=reg_scale, 
+            reg_type=reg_type
         )
         with torch.no_grad():
             mod.weight.copy_(lin.weight)
@@ -141,7 +145,12 @@ class TSVDLinear(nn.Linear):
         return F.linear(x, w_hat, bias)
 
     def layer_reg_loss(self):
-        return self.lr_scalars.abs().mean()
+        if self.reg_type == "l1":
+            return self.reg_scale * self.lr_scalars.abs().mean()
+        elif self.reg_type == "l2":
+            return self.reg_scale * self.lr_scalars.pow(2).mean()
+        else:
+            raise ValueError(f"Invalid regularization type: {self.reg_type}")
 
     def reset_lowrank(self, rank: int):
         """Reset the low-rank approximation with a new rank"""

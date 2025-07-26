@@ -24,7 +24,7 @@ def quantize(
     layer_names: list = None,
     ignore_layers: list = None,
     quant_type: str = "trqlinear",
-    **kwargs,
+    **quant_kwargs,
 ) -> nn.Module:
     """
     Quantizes selected nn.Linear layers in the model using TRQLinear.
@@ -60,7 +60,7 @@ def quantize(
                 if full_name in ignore_layers:
                     continue
                 if full_name in layer_names:
-                    trq = quant_layer.from_linear(child, **kwargs)
+                    trq = quant_layer.from_linear(child, **quant_kwargs)
                     setattr(module, name, trq)
             else:
                 _quantize(child, full_name)
