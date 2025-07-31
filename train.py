@@ -4,10 +4,10 @@ import pytorch_lightning as pl
 import torch
 from dotenv import load_dotenv
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pathlib import Path
 import sys
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import yaml
 from config_utils import get_train_config, Config
 
@@ -28,6 +28,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 
 def flatten_dict(d, parent_key="", sep="/"):
+    """Flatten a nested dictionary for logging purposes"""
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -38,7 +39,145 @@ def flatten_dict(d, parent_key="", sep="/"):
     return dict(items)
 
 
+def print_header(title: str, width: int = 80):
+    """Print a formatted header"""
+    print("\n" + "=" * width)
+    print(f" {title} ".center(width))
+    print("=" * width)
+
+
+def print_section(title: str, width: int = 80):
+    """Print a formatted section header"""
+    print(f"\n{title}")
+    print("-" * len(title))
+
+
+def format_config_value(value):
+    """Format configuration values for display"""
+    if isinstance(value, dict):
+        return f"Dict({len(value)} items)"
+    elif isinstance(value, list):
+        return f"List({len(value)} items)"
+    elif isinstance(value, (str, int, float, bool)):
+        return str(value)
+    else:
+        return str(type(value).__name__)
+
+
+def print_config(config: Config):
+    """Print configuration in a nicely formatted way"""
+    print_header("TRAINING CONFIGURATION")
+    
+    # Get all configuration sections
+    sections = [
+        ("Module Config", getattr(config, "module_config", {})),
+        ("Data Config", getattr(config, "datamodule_config", {})),
+        ("Training Config", getattr(config, "train_config", {})),
+        ("Checkpoint Config", getattr(config, "model_checkpoint_config", {})),
+        ("Logger Config", getattr(config, "logger_config", {})),
+        ("Quantization Config", getattr(config, "quantization_config", {})),
+    ]
+    
+    for section_name, section_config in sections:
+        if section_config:  # Only print non-empty sections
+            print_section(section_name)
+            for key, value in section_config.items():
+                formatted_value = format_config_value(value)
+                print(f"  {key:25} : {formatted_value}")
+
+
+def count_parameters(model: torch.nn.Module) -> tuple[int, int]:
+    """Count total and trainable parameters in a model"""
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
+
+
+def format_parameter_count(count: int) -> str:
+    """Format parameter count with appropriate units"""
+    if count >= 1e9:
+        return f"{count/1e9:.2f}B"
+    elif count >= 1e6:
+        return f"{count/1e6:.2f}M"
+    elif count >= 1e3:
+        return f"{count/1e3:.2f}K"
+    else:
+        return str(count)
+
+
+def print_model_info(module: pl.LightningModule):
+    """Print model information in a nicely formatted way"""
+    print_header("MODEL INFORMATION")
+    
+    # Basic model info
+    print_section("Model Details")
+    print(f"  Model Type        : {type(module).__name__}")
+    
+    # Parameter counts
+    total_params, trainable_params = count_parameters(module)
+    print(f"  Total Parameters  : {format_parameter_count(total_params)} ({total_params:,})")
+    print(f"  Trainable Params  : {format_parameter_count(trainable_params)} ({trainable_params:,})")
+    
+    # Device and dtype info
+    device = next(module.parameters()).device if len(list(module.parameters())) > 0 else "N/A"
+    dtype = next(module.parameters()).dtype if len(list(module.parameters())) > 0 else "N/A"
+    print(f"  Device            : {device}")
+    print(f"  Data Type         : {dtype}")
+    
+    # Model-specific info
+    if hasattr(module, 'is_quantized'):
+        print(f"  Quantized         : {module.is_quantized}")
+        if module.is_quantized and hasattr(module, 'quant_type'):
+            print(f"  Quantization Type : {module.quant_type}")
+    
+    if hasattr(module, 'pretrained'):
+        print(f"  Pretrained        : {module.pretrained}")
+    
+    if hasattr(module, 'image_size'):
+        print(f"  Image Size        : {module.image_size}")
+    
+    if hasattr(module, 'learning_rate'):
+        print(f"  Learning Rate     : {module.learning_rate}")
+
+
+def print_training_start_info(datamodule, logger):
+    """Print information about the training setup"""
+    print_header("TRAINING SETUP")
+    
+    # Dataset info
+    print_section("Dataset Information")
+    if hasattr(datamodule, 'num_classes'):
+        print(f"  Number of Classes : {datamodule.num_classes}")
+    
+    # Try to get dataset sizes
+    try:
+        datamodule.setup()
+        train_size = len(datamodule.train_dataloader().dataset) if hasattr(datamodule.train_dataloader(), 'dataset') else "Unknown"
+        batch_size = datamodule.train_dataloader().batch_size if hasattr(datamodule.train_dataloader(), 'batch_size') else "Unknown"
+        print(f"  Training Samples  : {train_size}")
+        print(f"  Batch Size        : {batch_size}")
+        
+        if train_size != "Unknown" and batch_size != "Unknown":
+            steps_per_epoch = train_size // batch_size
+            print(f"  Steps per Epoch   : {steps_per_epoch}")
+    except:
+        print(f"  Training Samples  : Unknown")
+    
+    # Logger info
+    print_section("Logging Setup")
+    logger_type = type(logger).__name__
+    print(f"  Logger Type       : {logger_type}")
+    
+    if hasattr(logger, 'save_dir'):
+        print(f"  Save Directory    : {logger.save_dir}")
+    if hasattr(logger, 'name'):
+        print(f"  Experiment Name   : {logger.name}")
+    if hasattr(logger, 'project'):
+        print(f"  Project           : {logger.project}")
+
+
 def get_module(module_config):
+    """Load and return the specified model module"""
     module_type = module_config.pop("module", "vit")
 
     if module_type == "dit":
@@ -70,6 +209,7 @@ def get_module(module_config):
 
 
 def get_datamodule(datamodule_config):
+    """Load and return the specified data module"""
     dataset = datamodule_config.pop("dataset", "cifar100")
 
     if dataset == "imagenet":
@@ -107,26 +247,75 @@ def create_model_checkpoint_callback(model_checkpoint_config):
 
 
 def create_logger(logger_config, config_dict=None):
-    """Create logger from configuration"""
-    logger_type = logger_config.get("type", "wandb")
-
+    """Create logger from configuration
+    
+    Supports both WandB and TensorBoard loggers based on configuration.
+    
+    Args:
+        logger_config: Dictionary containing logger configuration
+        config_dict: Optional full configuration to log as hyperparameters
+        
+    Returns:
+        Configured logger instance
+        
+    Example logger_config:
+        # For WandB
+        {
+            "type": "wandb",
+            "project": "my-project", 
+            "name": "experiment-1"
+        }
+        
+        # For TensorBoard  
+        {
+            "type": "tensorboard",
+            "save_dir": "./logs",
+            "name": "experiment-1"
+        }
+    """
+    logger_type = logger_config.get("type", "wandb").lower()
+    
     if logger_type == "wandb":
-        logger = WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
-        # Log the full configuration
+        logger_kwargs = {k: v for k, v in logger_config.items() if k != "type"}
+        logger = WandbLogger(**logger_kwargs)
+        
+        # Log the full configuration as hyperparameters
         if config_dict is not None:
             logger.log_hyperparams(flatten_dict(config_dict))
+            
         return logger
+        
+    elif logger_type == "tensorboard":
+        logger_kwargs = {k: v for k, v in logger_config.items() if k != "type"}
+        
+        # Set default save_dir if not provided
+        if "save_dir" not in logger_kwargs:
+            logger_kwargs["save_dir"] = "./logs"
+            
+        logger = TensorBoardLogger(**logger_kwargs)
+        
+        # Log hyperparameters for TensorBoard
+        if config_dict is not None:
+            logger.log_hyperparams(flatten_dict(config_dict))
+            
+        return logger
+        
     else:
-        raise ValueError(f"Unsupported logger type: {logger_type}")
+        raise ValueError(f"Unsupported logger type: {logger_type}. Supported types: 'wandb', 'tensorboard'")
 
 
 def main():
+    """Main training function"""
     # Load configuration from YAML file
+    if len(sys.argv) < 2:
+        raise ValueError("Please provide a configuration file path as argument")
+        
     config_path = sys.argv[1]
     config_dict = load_config(config_path)
     config = Config(config_dict)
 
-    print(f"Training configuration: {config}")
+    # Print nicely formatted configuration
+    print_config(config)
 
     # Extract configuration sections
     module_config = getattr(config, "module_config", {})
@@ -140,11 +329,12 @@ def main():
     module = get_module(module_config)
 
     # Apply quantization if specified
-    quant_type = quantization_config.pop("quant_type", "none")
+    quant_type = quantization_config.pop("quant_type", None)
     if quant_type != None:
         module.apply_quantization(quant_type=quant_type, **quantization_config)
 
-    print(module)
+    # Print nicely formatted model information
+    print_model_info(module)
 
     # Load the Data Module
     datamodule = get_datamodule(datamodule_config)
@@ -158,6 +348,9 @@ def main():
     # Create model checkpoint callback
     checkpoint_callback = create_model_checkpoint_callback(model_checkpoint_config)
 
+    # Print training setup information
+    print_training_start_info(datamodule, logger)
+
     # Create trainer with train_config parameters
     trainer_kwargs = {
         "callbacks": [checkpoint_callback],
@@ -167,6 +360,7 @@ def main():
         **train_config,
     }
 
+    print_header("STARTING TRAINING")
     trainer = pl.Trainer(**trainer_kwargs)
     trainer.fit(module, train_loader)
 

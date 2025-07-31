@@ -1,5 +1,3 @@
-# Training configuration for DiT on ImageNet
-
 # Module configuration - model-specific parameters
 module_config:
   module: "dit"
