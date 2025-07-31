@@ -6,9 +6,9 @@ import torch.nn.functional as F
 # ---------- helpers ----------
 def ternary_quantize(w: torch.Tensor, thresh_ratio: float = 0.75):
     abs_w = w.abs()
-    delta = thresh_ratio * abs_w.mean(dim=1, keepdim=True)           # (out,1)
-    mask  = (abs_w > delta).to(w.dtype)
-    q_ng  = torch.sign(w) * mask                                     # ternary
+    delta = thresh_ratio * abs_w.mean(dim=1, keepdim=True)  # (out,1)
+    mask = (abs_w > delta).to(w.dtype)
+    q_ng = torch.sign(w) * mask  # ternary
     nonzeros = mask.sum(dim=1, keepdim=True)
     alpha = (abs_w * mask).sum(dim=1, keepdim=True) / nonzeros.clamp(min=1)
     return q_ng, alpha, mask, delta
@@ -28,14 +28,20 @@ class TSVDTLinear(nn.Linear):
     """
 
     def __init__(
-        self, in_features, out_features,
-        bias=True, rank=8, thresh_ratio=0.75,
-        reg_scale=1e-4, reg_type="l2", reg_target="E_lr"  # "factor" | "E_lr"
+        self,
+        in_features,
+        out_features,
+        bias=True,
+        rank=8,
+        thresh_ratio=0.75,
+        reg_scale=1e-4,
+        reg_type="l2",
+        reg_target="E_lr",  # "factor" | "E_lr"
     ):
         super().__init__(in_features, out_features, bias=bias)
 
         self.thresh_ratio = thresh_ratio
-        self.rank         = rank
+        self.rank = rank
 
         # ----- trainable low-rank factors -----
         self.L = nn.Parameter(torch.empty(out_features, rank))
@@ -48,9 +54,9 @@ class TSVDTLinear(nn.Linear):
         self.alpha = nn.Parameter(torch.ones(out_features, 1))
 
         # ----- regularisation config -----
-        self.reg_scale  = float(reg_scale)
-        self.reg_type   = reg_type.lower()   # "l1" | "l2"
-        self.reg_target = reg_target.lower() # "factor" | "e_lr"
+        self.reg_scale = float(reg_scale)
+        self.reg_type = reg_type.lower()  # "l1" | "l2"
+        self.reg_target = reg_target.lower()  # "factor" | "e_lr"
 
         # populate parameters via SVD
         self._init_weights(rank)
@@ -58,14 +64,24 @@ class TSVDTLinear(nn.Linear):
     # ---- convenience constructor ----
     @classmethod
     def from_linear(
-        cls, lin: nn.Linear, rank=8, thresh_ratio=0.75,
-        reg_scale=1e-4, reg_type="l2", reg_target="factor"
+        cls,
+        lin: nn.Linear,
+        rank=8,
+        thresh_ratio=0.75,
+        reg_scale=1e-4,
+        reg_type="l2",
+        reg_target="factor",
     ):
-        mod = cls(lin.in_features, lin.out_features,
-                  bias=(lin.bias is not None),
-                  rank=rank, thresh_ratio=thresh_ratio,
-                  reg_scale=reg_scale, reg_type=reg_type,
-                  reg_target=reg_target)
+        mod = cls(
+            lin.in_features,
+            lin.out_features,
+            bias=(lin.bias is not None),
+            rank=rank,
+            thresh_ratio=thresh_ratio,
+            reg_scale=reg_scale,
+            reg_type=reg_type,
+            reg_target=reg_target,
+        )
         with torch.no_grad():
             mod.weight.copy_(lin.weight)
             if lin.bias is not None:
@@ -87,8 +103,8 @@ class TSVDTLinear(nn.Linear):
         # 2. truncated SVD of the residual
         U, S, Vh = torch.linalg.svd(E, full_matrices=False)
         r = min(self.rank, S.numel())
-        L0 = U[:, :r] * S[:r].unsqueeze(0)   # (out,r)
-        R0 = Vh[:r, :]                       # (r,in)
+        L0 = U[:, :r] * S[:r].unsqueeze(0)  # (out,r)
+        R0 = Vh[:r, :]  # (r,in)
 
         # 3. copy into parameters (keep requires_grad=True)
         self.L.data.copy_(L0)
@@ -98,23 +114,23 @@ class TSVDTLinear(nn.Linear):
     # ---- forward ----
     def forward(self, x: torch.Tensor):
         q_ng, _, _, _ = ternary_quantize(self.weight, self.thresh_ratio)
-        q = ste_hard_replace(self.weight, q_ng)          # STE
-        w_q = self.alpha * q                             # ternary branch
+        q = ste_hard_replace(self.weight, q_ng)  # STE
+        w_q = self.alpha * q  # ternary branch
 
         # low-rank residual (lr_scalars fixed at 1.0)
-        E_lr = self.L @ self.R                           # (out,in)
+        E_lr = self.L @ self.R  # (out,in)
         w_hat = w_q + E_lr
 
-        return F.linear(x, w_hat.to(x.dtype),
-                        None if self.bias is None else self.bias.to(x.dtype))
+        return F.linear(
+            x, w_hat.to(x.dtype), None if self.bias is None else self.bias.to(x.dtype)
+        )
 
     # ---- regulariser ----
     def layer_reg_loss(self):
         p = 1 if self.reg_type == "l1" else 2
 
         if self.reg_target == "factor":
-            loss = (self.L.norm(p=p) / self.L.numel()
-                    + self.R.norm(p=p) / self.R.numel())
+            loss = self.L.norm(p=p) / self.L.numel() + self.R.norm(p=p) / self.R.numel()
         elif self.reg_target == "e_lr":
             loss = (self.L @ self.R).norm(p=p) / (self.L.size(0) * self.R.size(1))
         else:
@@ -128,11 +144,13 @@ class TSVDTLinear(nn.Linear):
         self._init_weights(rank)
 
     def extra_repr(self):
-        return (f"in_features={self.in_features}, out_features={self.out_features}, "
-                f"bias={self.bias is not None}, rank={self.rank}, "
-                f"thresh_ratio={self.thresh_ratio}, "
-                f"reg={self.reg_type}@{self.reg_scale}, target={self.reg_target}")
-    
+        return (
+            f"in_features={self.in_features}, out_features={self.out_features}, "
+            f"bias={self.bias is not None}, rank={self.rank}, "
+            f"thresh_ratio={self.thresh_ratio}, "
+            f"reg={self.reg_type}@{self.reg_scale}, target={self.reg_target}"
+        )
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt

@@ -34,7 +34,9 @@ class CIFAR100DataModule(pl.LightningDataModule):
             transforms.Resize((224, 224)),  # Resize for ViT
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-            transforms.RandomErasing(p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)),  # Regularization
+            transforms.RandomErasing(
+                p=0.25, scale=(0.02, 0.2), ratio=(0.3, 3.3)
+            ),  # Regularization
         ]
 
         val_transform = [

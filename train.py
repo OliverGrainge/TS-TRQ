@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from pathlib import Path
-import sys 
+import sys
 from typing import Dict, Any
 import yaml
 from config_utils import get_train_config, Config
@@ -14,19 +14,20 @@ from config_utils import get_train_config, Config
 load_dotenv()
 torch.set_float32_matmul_precision("high")
 
+
 def load_config(config_path: str) -> Dict[str, Any]:
     """Load configuration from YAML file"""
     config_file = Path(config_path)
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    
-    with open(config_file, 'r') as f:
+
+    with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-    
+
     return config
 
 
-def flatten_dict(d, parent_key='', sep='/'):
+def flatten_dict(d, parent_key="", sep="/"):
     items = []
     for k, v in d.items():
         new_key = f"{parent_key}{sep}{k}" if parent_key else k
@@ -36,9 +37,10 @@ def flatten_dict(d, parent_key='', sep='/'):
             items.append((new_key, v))
     return dict(items)
 
+
 def get_module(module_config):
     module_type = module_config.pop("module", "vit")
-    
+
     if module_type == "dit":
         from models import DiTModule
 
@@ -62,7 +64,6 @@ def get_module(module_config):
         if checkpoint is not None:
             return ViTModule.load_from_checkpoint(checkpoint, **module_config)
         else:
-            print(module_config)
             return ViTModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
@@ -70,7 +71,7 @@ def get_module(module_config):
 
 def get_datamodule(datamodule_config):
     dataset = datamodule_config.pop("dataset", "cifar100")
-    
+
     if dataset == "imagenet":
         from data import ImageNetDataModule
 
@@ -86,7 +87,7 @@ def get_datamodule(datamodule_config):
 def create_model_checkpoint_callback(model_checkpoint_config):
     """Create ModelCheckpoint callback from configuration"""
     from pathlib import Path
-    
+
     # Set defaults if not provided
     config = {
         "monitor": "val_loss",
@@ -94,21 +95,21 @@ def create_model_checkpoint_callback(model_checkpoint_config):
         "save_top_k": 3,
         "mode": "min",
         "save_last": True,
-        **model_checkpoint_config
+        **model_checkpoint_config,
     }
-    
+
     # Handle dirpath creation
     if "save_dir" in config:
         dirpath = Path(config.pop("save_dir"))
         config["dirpath"] = str(dirpath)
-    
+
     return ModelCheckpoint(**config)
 
 
 def create_logger(logger_config, config_dict=None):
     """Create logger from configuration"""
     logger_type = logger_config.get("type", "wandb")
-    
+
     if logger_type == "wandb":
         logger = WandbLogger(**{k: v for k, v in logger_config.items() if k != "type"})
         # Log the full configuration
@@ -124,23 +125,23 @@ def main():
     config_path = sys.argv[1]
     config_dict = load_config(config_path)
     config = Config(config_dict)
-    
+
     print(f"Training configuration: {config}")
-    
+
     # Extract configuration sections
-    module_config = getattr(config, 'module_config', {})
-    datamodule_config = getattr(config, 'datamodule_config', {})
-    train_config = getattr(config, 'train_config', {})
-    model_checkpoint_config = getattr(config, 'model_checkpoint_config', {})
-    logger_config = getattr(config, 'logger_config', {})
-    quantization_config = getattr(config, 'quantization_config', {})
-    
+    module_config = getattr(config, "module_config", {})
+    datamodule_config = getattr(config, "datamodule_config", {})
+    train_config = getattr(config, "train_config", {})
+    model_checkpoint_config = getattr(config, "model_checkpoint_config", {})
+    logger_config = getattr(config, "logger_config", {})
+    quantization_config = getattr(config, "quantization_config", {})
+
     # Load the model module
     module = get_module(module_config)
 
     # Apply quantization if specified
     quant_type = quantization_config.pop("quant_type", "none")
-    if quant_type != "none":
+    if quant_type != None:
         module.apply_quantization(quant_type=quant_type, **quantization_config)
 
     print(module)
@@ -150,7 +151,6 @@ def main():
 
     datamodule.setup()
     train_loader = datamodule.train_dataloader()
-    val_loader = datamodule.val_dataloader()
 
     # Create logger
     logger = create_logger(logger_config, config_dict)
@@ -164,11 +164,11 @@ def main():
         "logger": logger,
         "log_every_n_steps": 5,
         "gradient_clip_val": 1.0,
-        **train_config
+        **train_config,
     }
-    
+
     trainer = pl.Trainer(**trainer_kwargs)
-    trainer.fit(module, train_loader, val_loader)
+    trainer.fit(module, train_loader)
 
 
 if __name__ == "__main__":

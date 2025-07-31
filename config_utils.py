@@ -9,10 +9,10 @@ def load_config(config_path: str) -> Dict[str, Any]:
     config_file = Path(config_path)
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    
-    with open(config_file, 'r') as f:
+
+    with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-    
+
     return config
 
 
@@ -22,13 +22,13 @@ def get_config_path() -> str:
         print("Usage: python script.py <config.yaml>")
         print("Example: python train.py configs/train_dit_imagenet.yaml")
         sys.exit(1)
-    
+
     return sys.argv[1]
 
 
 def get_default_train_config() -> Dict[str, Any]:
     """Get default training configuration with structured sections"""
-    
+
     return {
         # Module configuration
         "module_config": {
@@ -37,19 +37,17 @@ def get_default_train_config() -> Dict[str, Any]:
             "reg_scale": 0.5,
             "model_name": "Ahmed9275/Vit-Cifar100",
             "num_classes": 100,
-            "checkpoint": None
+            "checkpoint": None,
         },
-        
-        # Data module configuration  
+        # Data module configuration
         "datamodule_config": {
             "dataset": "cifar100",
             "batch_size": 8,
             "num_workers": 4,
             "image_size": 224,
             "data_dir": "./data/raw",
-            "download": True
+            "download": True,
         },
-        
         # Training configuration
         "train_config": {
             "max_epochs": 20,
@@ -58,9 +56,8 @@ def get_default_train_config() -> Dict[str, Any]:
             "accelerator": "gpu",
             "devices": "1",
             "strategy": "auto",
-            "enable_progress_bar": False
+            "enable_progress_bar": False,
         },
-        
         # Model checkpoint configuration
         "model_checkpoint_config": {
             "save_dir": "checkpoints",
@@ -68,28 +65,21 @@ def get_default_train_config() -> Dict[str, Any]:
             "filename": "{epoch:02d}-{val_loss:.2f}",
             "save_top_k": 3,
             "mode": "min",
-            "save_last": True
+            "save_last": True,
         },
-        
         # Logger configuration
-        "logger_config": {
-            "type": "wandb",
-            "project": "vit",
-            "log_model": False
-        },
-        
+        "logger_config": {"type": "wandb", "project": "vit", "log_model": False},
         # Quantization configuration
-        "quantization_config": {
-            "quant_type": "none",
-            "rank": 192
-        }
+        "quantization_config": {"quant_type": "none", "rank": 192},
     }
 
 
-def merge_configs(default_config: Dict[str, Any], file_config: Dict[str, Any]) -> Dict[str, Any]:
+def merge_configs(
+    default_config: Dict[str, Any], file_config: Dict[str, Any]
+) -> Dict[str, Any]:
     """Merge file configuration with default configuration, preserving structure"""
     merged_config = default_config.copy()
-    
+
     for section_key, section_value in file_config.items():
         if section_key in merged_config and isinstance(section_value, dict):
             # Merge nested dictionary sections
@@ -97,29 +87,29 @@ def merge_configs(default_config: Dict[str, Any], file_config: Dict[str, Any]) -
         else:
             # Direct replacement for non-dict values or new keys
             merged_config[section_key] = section_value
-    
+
     return merged_config
 
 
 def get_train_config() -> Dict[str, Any]:
     """Get training configuration with structured sections and defaults"""
-    
+
     # Get default configuration
     default_config = get_default_train_config()
-    
+
     # Load from config file
     config_path = get_config_path()
     file_config = load_config(config_path)
-    
+
     # Merge configurations
     merged_config = merge_configs(default_config, file_config)
-    
+
     return merged_config
 
 
 def get_val_config() -> Dict[str, Any]:
     """Get validation configuration with structured sections"""
-    
+
     # Default validation configuration
     default_config = {
         # Module configuration
@@ -127,49 +117,35 @@ def get_val_config() -> Dict[str, Any]:
             "module": "dit",
             "learning_rate": 1e-6,
             "reg_scale": 0.5,
-            "checkpoint": None  # Required for validation
+            "checkpoint": None,  # Required for validation
         },
-        
         # Data module configuration
-        "datamodule_config": {
-            "dataset": "imagenet",
-            "batch_size": 8,
-            "num_workers": 4
-        },
-        
+        "datamodule_config": {"dataset": "imagenet", "batch_size": 8, "num_workers": 4},
         # Training configuration (validation specific)
-        "train_config": {
-            "precision": 32,
-            "accelerator": "gpu",
-            "devices": "1"
-        },
-        
+        "train_config": {"precision": 32, "accelerator": "gpu", "devices": "1"},
         # Quantization configuration
-        "quantization_config": {
-            "quant_type": "none",
-            "rank": 192
-        },
-        
+        "quantization_config": {"quant_type": "none", "rank": 192},
         # Validation specific
-        "test": False
+        "test": False,
     }
-    
+
     # Load from config file
     config_path = get_config_path()
     file_config = load_config(config_path)
-    
+
     # Merge configurations
     merged_config = merge_configs(default_config, file_config)
-    
+
     return merged_config
 
 
 class Config:
     """Configuration class to hold all settings"""
+
     def __init__(self, config_dict: Dict[str, Any]):
         for key, value in config_dict.items():
             setattr(self, key, value)
-    
+
     def __repr__(self):
         items = []
         for k, v in self.__dict__.items():
@@ -179,4 +155,4 @@ class Config:
                 items.append(f"{k}={{{', '.join(nested_items)}}}")
             else:
                 items.append(f"{k}={v}")
-        return f"Config({', '.join(items)})" 
+        return f"Config({', '.join(items)})"
