@@ -54,10 +54,13 @@ def main():
     # Load configuration from YAML file
     config_dict = get_val_config()
     config = Config(config_dict)
-    
+
     print(f"Validation configuration: {config}")
 
-    module_kwargs = {"learning_rate": config.learning_rate, "reg_scale": config.reg_scale}
+    module_kwargs = {
+        "learning_rate": config.learning_rate,
+        "reg_scale": config.reg_scale,
+    }
 
     # Check if checkpoint exists (if provided)
     checkpoint_path = None
@@ -76,7 +79,9 @@ def main():
     # Apply quantization if specified
     if config.quant_type != "none":
         quant_kwargs = {"rank": config.quant_rank}
-        module.apply_quantization(quant_type=config.quant_type, quant_kwargs=quant_kwargs)
+        module.apply_quantization(
+            quant_type=config.quant_type, quant_kwargs=quant_kwargs
+        )
         print(f"Applied {config.quant_type} quantization with rank {config.quant_rank}")
 
     # Load the Data Module

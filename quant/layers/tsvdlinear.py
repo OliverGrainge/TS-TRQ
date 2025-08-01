@@ -11,7 +11,9 @@ def ternary_quantize(w: torch.Tensor, thresh_ratio: float = 0.75):
     mask = (abs_w > delta).to(w.dtype)
     q_nograd = torch.sign(w) * mask
     nonzeros = mask.sum(dim=1, keepdim=True)  # Shape: (out_features, 1)
-    alpha = (abs_w * mask).sum(dim=1, keepdim=True) / nonzeros.clamp(min=1)  # Shape: (out_features, 1)
+    alpha = (abs_w * mask).sum(dim=1, keepdim=True) / nonzeros.clamp(
+        min=1
+    )  # Shape: (out_features, 1)
     return q_nograd, alpha, mask, delta
 
 
@@ -20,11 +22,20 @@ def ste_hard_replace(x_cont: torch.Tensor, x_disc_nograd: torch.Tensor):
 
 
 class TSVDLinear(nn.Linear):
-    def __init__(self, in_features, out_features, bias=True, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"):
+    def __init__(
+        self,
+        in_features,
+        out_features,
+        bias=True,
+        rank=8,
+        thresh_ratio=0.75,
+        reg_scale=0.5,
+        reg_type="l1",
+    ):
         super().__init__(in_features, out_features, bias=bias)
         self.thresh_ratio = thresh_ratio
         self.rank = rank
-        self.reg_scale = reg_scale 
+        self.reg_scale = reg_scale
         self.reg_type = reg_type
 
         self.register_buffer("L", torch.zeros(out_features, rank))
@@ -36,15 +47,17 @@ class TSVDLinear(nn.Linear):
         self.lr_scalars = nn.Parameter(torch.ones(out_features, 1))
 
     @classmethod
-    def from_linear(cls, lin: nn.Linear, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"):
+    def from_linear(
+        cls, lin: nn.Linear, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"
+    ):
         mod = cls(
             lin.in_features,
             lin.out_features,
             bias=(lin.bias is not None),
             rank=rank,
             thresh_ratio=thresh_ratio,
-            reg_scale=reg_scale, 
-            reg_type=reg_type
+            reg_scale=reg_scale,
+            reg_type=reg_type,
         )
         with torch.no_grad():
             mod.weight.copy_(lin.weight)
