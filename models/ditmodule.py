@@ -320,7 +320,7 @@ class DiTModule(pl.LightningModule):
 
     def _get_quant_layer_names(self) -> List[str]:
         """Get layer names suitable for quantization."""
-        quant_layer_keywords = ["fc1", "fc2", "qkv", "proj"]
+        quant_layer_keywords = ["fc1", "fc2", "qkv", "proj", "to_q", "to_k", "to_v", "to_out", "ff.net"]
         return [
             n
             for n, _ in self.transformer.named_modules()

@@ -2,7 +2,7 @@
 module_config:
   module: "dit"
   model_name: "ditxl2"
-  pretrained: false
+  pretrained: true
   learning_rate: 0.0004
   checkpoint: null
 

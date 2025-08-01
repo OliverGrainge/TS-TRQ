@@ -139,6 +139,10 @@ def print_model_info(module: pl.LightningModule):
     if hasattr(module, 'learning_rate'):
         print(f"  Learning Rate     : {module.learning_rate}")
 
+    # Print model architecture
+    print_section("Model Architecture")
+    print(module)
+
 
 def print_training_start_info(datamodule, logger):
     """Print information about the training setup"""
@@ -336,7 +340,6 @@ def main():
 
     # Print nicely formatted model information
     print_model_info(module)
-    raise Exception("Stop here")
 
     # Load the Data Module
     datamodule = get_datamodule(datamodule_config)
