@@ -1,33 +1,31 @@
-
-# Training configuration for DiT on ImageNet
-
 # Module configuration - model-specific parameters
 module_config:
   module: "dit"
-  model_name: "dit-xl-2-256"
-  learning_rate: 0.0001
+  model_name: "ditxl2"
+  pretrained: false
+  learning_rate: 0.0004
   checkpoint: null
 
 # Data module configuration - data-specific parameters
 datamodule_config:
   dataset: "imagenet"
-  batch_size: 16
-  num_workers: 4
+  batch_size: 128  # Per-GPU batch size (256 * 2 GPUs = 512 global batch size)
+  num_workers: 8
   image_size: 256
 
 # Training configuration - trainer-specific parameters
 train_config:
   max_epochs: 80
-  accumulate_grad_batches: 4
-  precision: bf16
+  accumulate_grad_batches: 2  # No gradient accumulation needed with multi-GPU
+  precision: "bf16-mixed"  # Fixed precision setting
   accelerator: "gpu"
-  devices: "1"
-  strategy: "auto"
+  devices: 1  # ✅ Changed from "0,1" to 2 for torchrun compatibility
+  strategy: 'auto'  # training strategy
   enable_progress_bar: true
 
 # Model checkpoint configuration - checkpoint saving parameters
 model_checkpoint_config:
-  save_dir: "checkpoints/vit/cifar100"
+  save_dir: "checkpoints/dit/imagenet"  # ✅ Fixed path (was cifar100, should be imagenet)
   monitor: "val_loss"
   filename: "{epoch:02d}-{val_loss:.2f}"
   save_top_k: 3
@@ -44,6 +42,6 @@ logger_config:
 # Quantization configuration - quantization-specific parameters
 quantization_config:
   quant_type: "tsvdlinear"
-  reg_scale: 16.0
-  reg_type: "l1"
+  reg_scale: 8.0
+  reg_type: "l2"
   rank: 196

@@ -142,6 +142,7 @@ def print_model_info(module: pl.LightningModule):
 
 def print_training_start_info(datamodule, logger):
     """Print information about the training setup"""
+    datamodule.setup()
     print_header("TRAINING SETUP")
     
     # Dataset info
@@ -335,12 +336,10 @@ def main():
 
     # Print nicely formatted model information
     print_model_info(module)
+    raise Exception("Stop here")
 
     # Load the Data Module
     datamodule = get_datamodule(datamodule_config)
-
-    datamodule.setup()
-    train_loader = datamodule.train_dataloader()
 
     # Create logger
     logger = create_logger(logger_config, config_dict)
@@ -362,7 +361,7 @@ def main():
 
     print_header("STARTING TRAINING")
     trainer = pl.Trainer(**trainer_kwargs)
-    trainer.fit(module, train_loader)
+    trainer.fit(module, datamodule)
 
 
 if __name__ == "__main__":

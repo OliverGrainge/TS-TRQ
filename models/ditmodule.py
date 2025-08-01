@@ -105,9 +105,10 @@ def _get_untrained_model(
     # Get the model constructor and create model
     model_constructor = DiT_models[model_key]
     patch_size = int(model_key.split('/')[-1])
-    input_size = image_size // patch_size
     
-    model = model_constructor(input_size=input_size)
+    # VAE downsamples by 8, so latents are image_size/8
+    latent_size = image_size // 8
+    model = model_constructor(input_size=latent_size)
     return model.to(dtype=dtype)
 
 
@@ -319,7 +320,12 @@ class DiTModule(pl.LightningModule):
 
     def _get_quant_layer_names(self) -> List[str]:
         """Get layer names suitable for quantization."""
-        return [n for n, _ in self.transformer.named_modules() if "ff" in n]
+        quant_layer_keywords = ["fc1", "fc2", "qkv", "proj"]
+        return [
+            n
+            for n, _ in self.transformer.named_modules()
+            if any(keyword in n for keyword in quant_layer_keywords)
+        ]
 
     def forward(
         self, 
@@ -592,6 +598,43 @@ class DiTModule(pl.LightningModule):
         
         return loss
 
+    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        """
+        Validation step for the diffusion model.
+        
+        Args:
+            batch: Tuple of (images, labels)
+            batch_idx: Batch index
+            
+        Returns:
+            Validation loss
+        """
+        images, labels = batch
+        
+        # Encode images to latent space
+        with torch.no_grad():
+            latents = self.vae.encode(images).latent_dist.sample().mul_(VAE_SCALE_FACTOR)
+            
+        # Sample random timesteps
+        t = torch.randint(
+            0, self.diffusion.num_timesteps, (latents.shape[0],), device=images.device
+        )
+        
+        # Prepare model kwargs based on pretrained status
+        model_kwargs = self._prepare_model_kwargs(labels)
+        
+        # Compute losses
+        loss_dict = self.diffusion.training_losses(
+            self.transformer, latents, t, model_kwargs, pretrained=self.pretrained
+        )
+        
+        loss = loss_dict["loss"].mean()
+        
+        # Log validation metrics
+        self._log_validation_metrics(loss)
+        
+        return loss
+
     def _prepare_model_kwargs(self, labels: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Prepare model kwargs based on pretrained status."""
         if self.pretrained:
@@ -618,6 +661,20 @@ class DiTModule(pl.LightningModule):
             log_dict["reg_loss"] = rloss
 
         self.log_dict(log_dict, on_step=True, prog_bar=False)
+
+    def _log_validation_metrics(self, loss: torch.Tensor) -> None:
+        """Log validation metrics."""
+        log_dict = {
+            "val_loss": loss,
+        }
+        
+        # Log additional validation metrics if model is quantized
+        if self.is_quantized:
+            log_dict["val_reg_loss"] = self.reg_loss()
+            log_dict["val_lr_scalars_magnitude"] = self.lr_scalars_magnitude()
+            log_dict["val_ternary_vs_lr_ratio"] = self.ternary_vs_lr_ratio()
+
+        self.log_dict(log_dict, on_step=False, prog_bar=True)
 
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """Configure the optimizer for training."""
