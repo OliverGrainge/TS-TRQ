@@ -2,7 +2,7 @@ from pytorch_lightning import LightningModule
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import ResNetForImageClassification
+from transformers import ResNetForImageClassification, ResNetConfig, ResNetModel
 from typing import Tuple, Any, List
 from quant import get_all_conv2d_names, quantize_model
 from typing import Optional
@@ -22,6 +22,8 @@ def load_resnet(model_name: str = "resnet18", num_classes: int = 100, image_size
         model = ResNetForImageClassification.from_pretrained("microsoft/resnet-18")
     elif model_name == "resnet50":
         model = ResNetForImageClassification.from_pretrained("microsoft/resnet-50")
+    elif model_name == "resnet50_untrained":
+        model = ResNetForImageClassification(ResNetConfig(num_labels=num_classes))
     else: 
         raise ValueError(f"Model {model_name} not supported")
 

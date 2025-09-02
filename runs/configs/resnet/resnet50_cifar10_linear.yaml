@@ -2,17 +2,17 @@
 
 module_config: 
     module_type: "resnet" 
-    model_name: "resnet18"
+    model_name: "resnet50_untrained"
     num_classes: 10
     learning_rate: 0.001 
-    image_size: 32
+    image_size: 224
 
 
 datamodule_config: 
     dataset: "cifar10"
     batch_size: 32
     num_workers: 0 
-    image_size: 32 
+    image_size: 224
 
 train_config: 
     accelerator: "auto" 
@@ -33,4 +33,4 @@ logger_config:
   log_model: false
  
 quantization_config:
-  quant_type: "tconv2d"
+  quant_type: null
