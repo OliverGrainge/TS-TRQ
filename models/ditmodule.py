@@ -9,7 +9,7 @@ from diffusers import DDPMScheduler, DiTPipeline, DPMSolverMultistepScheduler
 from PIL import Image
 from models.thirdparty.diffusion import create_diffusion
 
-from quant import linear_layer_names, quantize
+from quant import quantize_model
 
 
 # Constants
@@ -301,7 +301,7 @@ class DiTModule(pl.LightningModule):
         try:
             # Get linear layer names for quantization
             layer_names = self._get_quant_layer_names()
-            self.transformer = quantize(
+            self.transformer = quantize_model(
                 self.transformer,
                 layer_names=layer_names,
                 quant_type=quant_type,

@@ -23,7 +23,6 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
-
     return config
 
 
@@ -183,7 +182,7 @@ def print_training_start_info(datamodule, logger):
 
 def get_module(module_config):
     """Load and return the specified model module"""
-    module_type = module_config.pop("module", "vit")
+    module_type = module_config.pop("module_type", "vit")
 
     if module_type == "dit":
         from models import DiTModule
@@ -193,14 +192,6 @@ def get_module(module_config):
             return DiTModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return DiTModule(**module_config)
-    elif module_type == "mlp":
-        from models import MLPModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            return MLPModule.load_from_checkpoint(checkpoint, **module_config)
-        else:
-            return MLPModule(**module_config)
     elif module_type == "vit":
         from models import ViTModule
 
@@ -209,6 +200,13 @@ def get_module(module_config):
             return ViTModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return ViTModule(**module_config)
+    elif module_type == "resnet": 
+        from models import ResNetModule
+        checkpoint = module_config.pop("checkpoint", None) 
+        if checkpoint is not None: 
+            return ResNetModule.load_from_checkpoint(checkpoint, **module_config)
+        else:
+            return ResNetModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
 
@@ -225,6 +223,10 @@ def get_datamodule(datamodule_config):
         from data import CIFAR100DataModule
 
         return CIFAR100DataModule(**datamodule_config)
+    elif dataset == "cifar10": 
+        from data import CIFAR10DataModule 
+
+        return CIFAR10DataModule(**datamodule_config)
     else:
         raise ValueError(f"Invalid dataset: {dataset}")
 
@@ -233,20 +235,16 @@ def create_model_checkpoint_callback(model_checkpoint_config):
     """Create ModelCheckpoint callback from configuration"""
     from pathlib import Path
 
+    filename_prefix = model_checkpoint_config.pop("filename_prefix", "") if "filename_prefix" in model_checkpoint_config else ""
+
     # Set defaults if not provided
     config = {
         "monitor": "val_loss",
-        "filename": "{epoch:02d}-{val_loss:.2f}",
-        "save_top_k": 3,
+        "filename": f"{filename_prefix}{{epoch:02d}}-{{val_loss:.2f}}",
+        "save_top_k": 2,
         "mode": "min",
-        "save_last": True,
         **model_checkpoint_config,
     }
-
-    # Handle dirpath creation
-    if "save_dir" in config:
-        dirpath = Path(config.pop("save_dir"))
-        config["dirpath"] = str(dirpath)
 
     return ModelCheckpoint(**config)
 
@@ -289,24 +287,9 @@ def create_logger(logger_config, config_dict=None):
             logger.log_hyperparams(flatten_dict(config_dict))
             
         return logger
-        
-    elif logger_type == "tensorboard":
-        logger_kwargs = {k: v for k, v in logger_config.items() if k != "type"}
-        
-        # Set default save_dir if not provided
-        if "save_dir" not in logger_kwargs:
-            logger_kwargs["save_dir"] = "./logs"
-            
-        logger = TensorBoardLogger(**logger_kwargs)
-        
-        # Log hyperparameters for TensorBoard
-        if config_dict is not None:
-            logger.log_hyperparams(flatten_dict(config_dict))
-            
-        return logger
-        
+
     else:
-        raise ValueError(f"Unsupported logger type: {logger_type}. Supported types: 'wandb', 'tensorboard'")
+        raise ValueError(f"Unsupported logger type: {logger_type}. Supported types: 'wandb'")
 
 
 def main():

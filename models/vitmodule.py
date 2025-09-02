@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import ViTConfig, ViTForImageClassification
 
-from quant import quantize
+from quant import quantize_model
 
 
 # Constants
@@ -115,7 +115,7 @@ class ViTModule(pl.LightningModule):
         try:
             # Get linear layer names for quantization
             layer_names = self._get_quant_layer_names()
-            self.vit = quantize(
+            self.vit = quantize_model(
                 self.vit, layer_names=layer_names, quant_type=quant_type, **quant_kwargs
             )
 

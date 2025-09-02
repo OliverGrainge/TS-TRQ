@@ -25,7 +25,7 @@ print("HF_HUB_CACHE:", HF_HUB_CACHE)
 # Enable trust_remote_code for loading datasets with custom code
 for split in ["train", "test"]:
     ds = load_dataset(
-        "cifar100",
+        "cifar10",
         split=split,
         cache_dir=cache_dir,
         download_config=DownloadConfig(delete_extracted=True),

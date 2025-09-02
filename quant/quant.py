@@ -1,78 +1,145 @@
 import torch
 import torch.nn as nn
+from typing import List, Optional, Set
 
 from .layers import QUANT_LAYERS
 
 
-def linear_layer_names(model: nn.Module) -> list:
+def get_all_linear_names(model: nn.Module) -> List[str]:
+    """
+    Recursively collect all fully-qualified names of nn.Linear layers in the model.
+    
+    Args:
+        model (nn.Module): The model to search through
+        
+    Returns:
+        List[str]: List of fully-qualified layer names (e.g., ['0.0', '0.1', '1'])
+    """
     linear_names = []
 
-    def _collect(module: nn.Module, prefix: str = ""):
+    def _collect_recursive(module: nn.Module, prefix: str = ""):
+        """Recursively traverse the model to find linear layers."""
         for name, child in module.named_children():
+            # Build the full path name
             full_name = f"{prefix}.{name}" if prefix else name
+            
             if isinstance(child, nn.Linear):
                 linear_names.append(full_name)
             else:
-                _collect(child, prefix=full_name)
+                # Recursively search in child modules
+                _collect_recursive(child, prefix=full_name)
 
-    _collect(model)
+    _collect_recursive(model)
     return linear_names
 
 
-def quantize(
+def get_all_conv2d_names(model: nn.Module) -> List[str]:
+    """
+    Recursively collect all fully-qualified names of nn.Conv2d layers in the model.
+
+    Args:
+        model (nn.Module): The model to search through
+
+    Returns:
+        List[str]: List of fully-qualified layer names (e.g., ['0.0', '0.1', '1'])
+    """
+    conv2d_names = []
+
+    def _collect_recursive(module: nn.Module, prefix: str = ""):
+        """Recursively traverse the model to find Conv2d layers."""
+        for name, child in module.named_children():
+            # Build the full path name
+            full_name = f"{prefix}.{name}" if prefix else name
+
+            if isinstance(child, nn.Conv2d):
+                conv2d_names.append(full_name)
+            else:
+                # Recursively search in child modules
+                _collect_recursive(child, prefix=full_name)
+
+    _collect_recursive(model)
+    return conv2d_names
+
+
+def quantize_model(
     model: nn.Module,
-    layer_names: list = None,
-    ignore_layers: list = None,
-    quant_type: str = "trqlinear",
+    layer_names: Optional[List[str]] = None,
+    ignore_layers: Optional[List[str]] = None,
+    quant_type: str = "tlinear",
     **quant_kwargs,
 ) -> nn.Module:
     """
-    Quantizes selected nn.Linear layers in the model using TRQLinear.
+    Quantize all layers in layer_names with the specified quantization layer type.
 
     Args:
-        model (nn.Module): The model to modify.
-        layer_names (list, optional): Fully-qualified names of layers to quantize.
-                                      If None, all nn.Linear layers will be quantized.
-        ignore_layers (list, optional): Fully-qualified names of layers to skip.
-        n_residuals (int): Number of ternary residuals to use.
+        model (nn.Module): The model to quantize
+        layer_names (List[str], optional): Specific layers to quantize. If None, quantizes all layers of the appropriate type
+        ignore_layers (List[str], optional): Layers to skip during quantization
+        quant_type (str): Type of quantization layer to use (must be in QUANT_LAYERS)
+        **quant_kwargs: Additional arguments passed to the quantization layer constructor
 
     Returns:
-        nn.Module: Modified model with selected layers quantized.
-    """
-    assert quant_type in QUANT_LAYERS, f"Invalid quant_type: {quant_type}"
-    quant_layer = QUANT_LAYERS[quant_type]
+        nn.Module: The modified model with selected layers quantized
 
-    if layer_names is None:
-        layer_names = linear_layer_names(model)
+    Raises:
+        ValueError: If quant_type is not supported
+    """
+    if quant_type not in QUANT_LAYERS:
+        available_types = list(QUANT_LAYERS.keys())
+        raise ValueError(f"Invalid quant_type: '{quant_type}'. Available types: {available_types}")
+
+    quant_layer_class = QUANT_LAYERS[quant_type]
+
+    # Set default layer names if none provided
+    if layer_names is None and "linear" in quant_type:
+        layer_names = get_all_linear_names(model)
+    elif layer_names is None and "conv2d" in quant_type:
+        layer_names = get_all_conv2d_names(model)
 
     if ignore_layers is None:
         ignore_layers = []
 
-    # Convert to set for faster lookup
-    layer_names = set(layer_names)
-    ignore_layers = set(ignore_layers)
+    target_layers: Set[str] = set(layer_names)
+    layers_to_ignore: Set[str] = set(ignore_layers)
 
-    def _quantize(module: nn.Module, prefix: str = ""):
+    def _quantize_recursive(module: nn.Module, prefix: str = ""):
         for name, child in module.named_children():
             full_name = f"{prefix}.{name}" if prefix else name
 
-            if isinstance(child, nn.Linear):
-                if full_name in ignore_layers:
-                    continue
-                if full_name in layer_names:
-                    trq = quant_layer.from_linear(child, **quant_kwargs)
-                    setattr(module, name, trq)
-            else:
-                _quantize(child, full_name)
+            if full_name in layers_to_ignore:
+                continue
 
-    _quantize(model)
+            # Quantize if this layer is in our target list
+            if full_name in target_layers:
+                # Determine which quantization method to use based on quant_type
+                if "linear" in quant_type and isinstance(child, nn.Linear):
+                    quantized_layer = quant_layer_class.from_linear(child, **quant_kwargs)
+                    setattr(module, name, quantized_layer)
+                elif "conv2d" in quant_type and isinstance(child, nn.Conv2d):
+                    quantized_layer = quant_layer_class.from_conv2d(child, **quant_kwargs)
+                    setattr(module, name, quantized_layer)
+                else:
+                    # If the type does not match, skip quantization for this layer
+                    pass
+            else:
+                _quantize_recursive(child, full_name)
+
+    _quantize_recursive(model)
     return model
 
 
+# Alias for backward compatibility
+quantize = quantize_model
+
+
 if __name__ == "__main__":
+    """
+    Example usage and testing of the quantization functionality.
+    """
     import copy
 
-    model = nn.Sequential(
+    # Create a simple test model with nested structure
+    test_model = nn.Sequential(
         nn.Sequential(
             nn.Linear(10, 20, bias=True),
             nn.Linear(20, 10, bias=True),
@@ -81,28 +148,46 @@ if __name__ == "__main__":
         nn.Linear(24, 10, bias=True),
     )
 
-    print("=" * 40)
-    print("Model before quantization:")
-    print(model)
-    print("=" * 40)
+    print("=" * 50)
+    print("MODEL QUANTIZATION DEMONSTRATION")
+    print("=" * 50)
+    
+    print("\nModel before quantization:")
+    print(test_model)
+    
+    # Get all linear layer names for reference
+    all_linear_names = get_all_linear_names(test_model)
+    print(f"\nAll linear layers found: {all_linear_names}")
 
-    # Make a deep copy so we can compare before/after quantization
-    model_before = copy.deepcopy(model)
-    quant_model = quantize(
-        model, quant_type="trqlinear", n_residuals=10, ignore_layers=["1"]
+    # Make a deep copy for comparison
+    original_model = copy.deepcopy(test_model)
+    
+    # Quantize the model (ignore the first layer in the nested sequential)
+    quantized_model = quantize_model(
+        test_model, 
+        quant_type="tlinear",  # Use ternary linear quantization
+        ignore_layers=["0.0"]  # Skip the first linear layer
     )
 
-    print("Model after quantization:")
-    print(quant_model)
-    print("=" * 40)
+    print("\nModel after quantization:")
+    print(quantized_model)
+    
+    # Test with sample input
+    test_input = torch.randn(10, 10)
+    
+    # Get outputs from both models
+    with torch.no_grad():
+        original_output = original_model(test_input)
+        quantized_output = quantized_model(test_input)
 
-    x = torch.randn(10, 10)
-
-    out_before = model_before(x)
-    out_after = quant_model(x)
-
-    # No need to print the tensors
-    diff = (out_before - out_after).abs()
-    print(f"Mean absolute difference: {diff.mean().item():.6f}")
-    print(f"Max absolute difference: {diff.max().item():.6f}")
-    print("=" * 40)
+    # Compare outputs
+    output_diff = (original_output - quantized_output).abs()
+    print(f"\nOutput comparison:")
+    print(f"Original output shape: {original_output.shape}")
+    print(f"Quantized output shape: {quantized_output.shape}")
+    print(f"Mean absolute difference: {output_diff.mean().item():.6f}")
+    print(f"Max absolute difference: {output_diff.max().item():.6f}")
+    
+    print("\n" + "=" * 50)
+    print("Quantization completed successfully!")
+    print("=" * 50)
