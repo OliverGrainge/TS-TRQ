@@ -49,7 +49,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         learning_rate: float = 1e-4,
         lr_scheduler: str = "constant",
         lr_warmup_steps: int = 500,
-        max_train_steps: int = 10000,
+        max_train_steps: int = 500000,
         gradient_checkpointing: bool = True,
         train_text_encoder: bool = False,
         resolution: int = 128,
