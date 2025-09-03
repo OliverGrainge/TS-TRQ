@@ -18,17 +18,41 @@ def replace_classifier(model: ResNetForImageClassification, num_classes: int = 1
     return model
 
 def load_resnet(model_name: str = "resnet18", num_classes: int = 100, image_size: int = 224): 
+    """Load ResNet model with support for both pretrained and untrained variants"""
+    
     if model_name == "resnet18":
-        model = ResNetForImageClassification.from_pretrained("microsoft/resnet-18")
+        return ResNetForImageClassification.from_pretrained("microsoft/resnet-18")
+    elif model_name == "resnet18_untrained":
+        # Create untrained ResNet18 with proper config
+        config = ResNetConfig(
+            num_labels=num_classes,
+            num_channels=3,
+            embedding_size=64,
+            hidden_sizes=[64, 128, 256, 512],
+            depths=[2, 2, 2, 2],  # ResNet18 layer structure
+            layer_type="basic",   # Use basic blocks for ResNet18
+            hidden_act="relu",
+            downsample_in_first_stage=False
+        )
+        return ResNetForImageClassification(config)
     elif model_name == "resnet50":
-        model = ResNetForImageClassification.from_pretrained("microsoft/resnet-50")
+        return ResNetForImageClassification.from_pretrained("microsoft/resnet-50")
     elif model_name == "resnet50_untrained":
-        model = ResNetForImageClassification(ResNetConfig(num_labels=num_classes))
+        # Create untrained ResNet50 with proper config
+        config = ResNetConfig(
+            num_labels=num_classes,
+            num_channels=3,
+            embedding_size=64,
+            hidden_sizes=[256, 512, 1024, 2048],
+            depths=[3, 4, 6, 3],  # ResNet50 layer structure
+            layer_type="bottleneck",  # Use bottleneck blocks for ResNet50
+            hidden_act="relu",
+            downsample_in_first_stage=False
+        )
+        return ResNetForImageClassification(config)
     else: 
-        raise ValueError(f"Model {model_name} not supported")
+        raise ValueError(f"Model {model_name} not supported. Supported models: resnet18, resnet18_untrained, resnet50, resnet50_untrained")
 
-    replace_classifier(model, num_classes=num_classes)
-    return model
 
 
 class ResNetModule(LightningModule):
@@ -48,9 +72,16 @@ class ResNetModule(LightningModule):
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         images, labels = batch
         logits = self(images)
-        loss = F.cross_entropy(logits, labels)
-        self.log("train_loss", loss)
-        return loss
+        ce_loss = F.cross_entropy(logits, labels)
+        reg_loss = self.reg_loss()
+        train_loss = ce_loss + reg_loss
+        self.log("ce_loss", ce_loss)
+        self.log("reg_loss", reg_loss)
+        self.log("train_loss", train_loss)
+
+        if self.global_step % 50 == 0:
+            self.log_stats()
+        return train_loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
         images, labels = batch
@@ -132,7 +163,7 @@ class ResNetModule(LightningModule):
             return torch.tensor(0.0, device=self.device)
 
         losses = []
-        for m in self.transformer.modules():
+        for m in self.model.modules():
             fn = getattr(m, "layer_reg_loss", None)
             if callable(fn):
                 losses.append(fn())
@@ -222,7 +253,7 @@ class ResNetModule(LightningModule):
             return ternary_part / (lowrank_part + epsilon)
 
     # Example usage for histogram logging:
-    def log_stats(self, logger=None, step=None):
+    def log_stats(self):
         """
         Helper method to log ternary vs low-rank ratios with histogram.
 
@@ -231,23 +262,9 @@ class ResNetModule(LightningModule):
             step: Training step for logging
         """
         ratios = self.ternary_vs_lr_ratio()
-
-        # If using WandbLogger from pytorch-lightning, use its log methods
-        if logger is not None:
-            log_dict = {
-                "ternary_vs_lr/mean": ratios['mean'],
-                "ternary_vs_lr/median": ratios['median'],
-                "ternary_vs_lr/min": ratios['min'],
-                "ternary_vs_lr/max": ratios['max'],
-            }
-
-            # WandbLogger expects log_dict and step as arguments
-            if hasattr(logger, "log_metrics"):
-                logger.log_metrics(log_dict, step=step)
-            elif hasattr(logger, "log"):
-                # fallback for other loggers
-                logger.log(log_dict, step=step)
-
+        for key, value in ratios.items():
+            if "value" not in key:
+                self.log(f"ternary_vs_LR_ratio/{key}", value, prog_bar=True)
         return ratios
 
 

@@ -4,6 +4,9 @@ Download ResNet-18 and ResNet-50 weights from HuggingFace and save to local cach
 Usage:
     python downloads/download_resnet.py
 """
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from transformers import ResNetForImageClassification
 

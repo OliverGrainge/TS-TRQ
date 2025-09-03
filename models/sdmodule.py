@@ -1,0 +1,1 @@
+.from_pretrained("segmind/tiny-sd", torch_dtype=torch.float16

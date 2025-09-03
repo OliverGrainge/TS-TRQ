@@ -3,36 +3,32 @@ module_config:
     model_name: "resnet18"
     num_classes: 10
     learning_rate: 0.001 
-    image_size: 32
-
+    image_size: 224
 
 datamodule_config: 
     dataset: "cifar10"
-    batch_size: 32
+    batch_size: 64
     num_workers: 0 
-    image_size: 32 
+    image_size: 224
 
 train_config: 
     accelerator: "auto" 
     strategy: "auto"
-    precision: "16-mixed"
-    max_epochs: 20 
-
+    precision: "bf16-mixed"
+    max_epochs: 10
     enable_progress_bar: true
-
+    val_check_interval: 0.5
 
 model_checkpoint_config: 
     dirpath: "checkpoints/resnet/resnet18_cifar10"
-    filname: resnet18_cifar10
+    filename: resnet18_cifar10
 
 logger_config:
   type: "wandb"
   project: "resnet18_cifar10"
+  name: "resnet18_linear"
   save_dir: "logs/"
   log_model: false
  
 quantization_config:
-  quant_type: "tconv2d"
-  reg_scale: 16.0
-  reg_type: "l2"
-  rank: 8 
+  quant_type: null
