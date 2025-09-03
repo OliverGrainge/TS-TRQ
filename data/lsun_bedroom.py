@@ -7,9 +7,11 @@ from datasets import load_dataset, DownloadConfig
 from dotenv import load_dotenv
 from PIL import Image
 
+load_dotenv()
 
-class HuggingFaceCIFAR100Dataset(Dataset):
-    """Wrapper to make HuggingFace CIFAR100 dataset compatible with PyTorch DataLoader"""
+
+class HuggingFaceLSUNBedroomDataset(Dataset):
+    """Wrapper to make HuggingFace LSUN Bedroom dataset compatible with PyTorch DataLoader"""
     
     def __init__(self, hf_dataset, transform=None):
         self.hf_dataset = hf_dataset
@@ -20,8 +22,11 @@ class HuggingFaceCIFAR100Dataset(Dataset):
     
     def __getitem__(self, idx):
         item = self.hf_dataset[idx]
-        image = item['img']  # This is already a PIL Image
-        label = item['fine_label']  # CIFAR100 uses 'fine_label' for the 100 classes
+        image = item['image']  # This is already a PIL Image
+        
+        # LSUN bedroom dataset typically doesn't have labels, so we'll use a dummy label
+        # or you can modify this based on your specific needs
+        label = 0  # Dummy label for bedroom class
         
         if self.transform:
             image = self.transform(image)
@@ -29,12 +34,12 @@ class HuggingFaceCIFAR100Dataset(Dataset):
         return {"pixel_values": image, "labels": label}
 
 
-class CIFAR100DataModule(pl.LightningDataModule):
+class LSUNBedroomDataModule(pl.LightningDataModule):
     def __init__(
         self,
         batch_size=32,
         num_workers=4,
-        image_size=224,  # Changed to 224 for ViT compatibility (was 32)
+        image_size=256,  # LSUN bedrooms are typically 256x256
         cache_dir=None,  # HuggingFace cache directory
         download=True,
     ):
@@ -49,21 +54,21 @@ class CIFAR100DataModule(pl.LightningDataModule):
         
         # Get HuggingFace token if available
         self.hf_token = os.getenv("HF_TOKEN")
+        self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
 
-        # Train transforms with data augmentation
+        # Train transforms with data augmentation for bedrooms
         train_transform = [
-            transforms.RandomCrop(32, padding=4),  # Standard for CIFAR-100
-            transforms.RandomHorizontalFlip(),     # Standard for CIFAR-100
-            transforms.Resize((self.image_size, self.image_size)),  # For ViT
+            transforms.RandomHorizontalFlip(),     # Standard augmentation
+            transforms.Resize((self.image_size, self.image_size)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),  # Standard normalization
         ]
 
         # Validation transforms: just resize and normalize
         val_transform = [
             transforms.Resize((self.image_size, self.image_size)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]),
+            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ]
 
         self.train_transform = transforms.Compose(train_transform)
@@ -72,34 +77,21 @@ class CIFAR100DataModule(pl.LightningDataModule):
     def setup(self, stage=None):
         """Setup datasets for training and validation"""
         
-        # Load training dataset
-        train_hf_dataset = load_dataset(
-            "cifar100",
-            split="train",
-            cache_dir=self.cache_dir,
-            download_config=DownloadConfig(delete_extracted=True) if self.download else None,
+        cache_dir = self.cache_dir or os.getenv("HF_DATASETS_CACHE", None)
+        ds = load_dataset(
+            "tglcourse/lsun_church_train",
+            cache_dir=cache_dir,
+            download_config=DownloadConfig(delete_extracted=True),
+            trust_remote_code=True,
         )
-        
-        # Load test dataset (used as validation)
-        val_hf_dataset = load_dataset(
-            "cifar100",
-            split="test",
-            cache_dir=self.cache_dir,
-            download_config=DownloadConfig(delete_extracted=True) if self.download else None,
-        )
+
         
         # Wrap HuggingFace datasets with PyTorch Dataset wrapper
-        self.train_dataset = HuggingFaceCIFAR100Dataset(
-            train_hf_dataset, 
-            transform=self.train_transform
-        )
-        self.val_dataset = HuggingFaceCIFAR100Dataset(
-            val_hf_dataset, 
-            transform=self.val_transform
-        )
+        self.train_dataset = HuggingFaceLSUNBedroomDataset(ds["train"], transform=self.train_transform)
+        self.test_dataset = HuggingFaceLSUNBedroomDataset(ds["test"], transform=self.val_transform)
         
         print(f"Training dataset size: {len(self.train_dataset)}")
-        print(f"Validation dataset size: {len(self.val_dataset)}")
+        print(f"Test dataset size: {len(self.test_dataset)}")
 
     def train_dataloader(self):
         return DataLoader(
@@ -112,24 +104,23 @@ class CIFAR100DataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
+        """Same as test_dataloader for testing"""
+        return self.test_dataloader()
+    
+    def test_dataloader(self):
         return DataLoader(
-            self.val_dataset,
+            self.test_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=torch.cuda.is_available(),
             persistent_workers=True if self.num_workers > 0 else False,
-        )
-
-    def test_dataloader(self):
-        """Same as val_dataloader for testing"""
-        return self.val_dataloader()
-
+        )     
 
 # Example usage
 if __name__ == "__main__":
     # Initialize the datamodule
-    dm = CIFAR100DataModule(batch_size=32, num_workers=4)
+    dm = LSUNBedroomDataModule(batch_size=32, num_workers=4)
     
     # Setup the datasets
     dm.setup()
@@ -137,9 +128,7 @@ if __name__ == "__main__":
     # Get a sample batch
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
-    images, labels = batch
-    
-    print(f"Batch shape: {images.shape}")
-    print(f"Labels shape: {labels.shape}")
-    print(f"Labels: {labels}")
-    print(f"Label range: {labels.min()} to {labels.max()}")  # Should be 0-99 for CIFAR100
+    print(f"Batch keys: {batch.keys()}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}")
+    print(f"Labels shape: {batch['labels'].shape}")
+    print(f"Labels: {batch['labels']}")

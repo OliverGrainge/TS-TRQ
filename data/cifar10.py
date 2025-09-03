@@ -26,7 +26,7 @@ class HuggingFaceCIFAR10Dataset(Dataset):
         if self.transform:
             image = self.transform(image)
             
-        return image, label
+        return {"pixel_values": image, "labels": label}
 
 
 class CIFAR10DataModule(pl.LightningDataModule):
@@ -35,7 +35,6 @@ class CIFAR10DataModule(pl.LightningDataModule):
         batch_size=32,
         num_workers=4,
         image_size=32,  # Changed to 224 for ViT compatibility
-        transform=None,
         cache_dir=None,  # HuggingFace cache directory
         download=True,
     ):  
@@ -139,8 +138,8 @@ if __name__ == "__main__":
     # Get a sample batch
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
-    images, labels = batch
     
-    print(f"Batch shape: {images.shape}")
-    print(f"Labels shape: {labels.shape}")
-    print(f"Labels: {labels}")
+    print(f"Batch keys: {batch.keys()}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}")
+    print(f"Labels shape: {batch['labels'].shape}")
+    print(f"Labels: {batch['labels']}")

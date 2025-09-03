@@ -71,7 +71,7 @@ class ImageNetDataModule(pl.LightningDataModule):
             labels.append(item["label"])
         images = torch.stack(images)
         labels = torch.tensor(labels)
-        return images, labels
+        return {"pixel_values": images, "labels": labels}
 
     def train_dataloader(self):
         return DataLoader(
