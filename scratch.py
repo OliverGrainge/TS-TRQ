@@ -179,7 +179,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         model_pred, target = self.forward(pixel_values, captions)
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         
-        self.log("val_loss", loss, prog_bar=True)
+        self.log("val_loss", loss)
         return loss
 
     def on_validation_epoch_end(self): 
@@ -408,7 +408,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         ratios = self.ternary_vs_lr_ratio()
         for key, value in ratios.items():
             if "value" not in key:
-                self.log(f"ternary_vs_LR_ratio/{key}", value, prog_bar=True)
+                self.log(f"ternary_vs_LR_ratio/{key}", value)
         return ratios
 
     @torch.no_grad()
@@ -615,6 +615,8 @@ def main():
         precision="bf16-mixed",  # Use mixed precision for memory efficiency
         logger=logger,
         gradient_clip_val=1.0,
+        limit_val_batches=50, 
+        val_check_interval=500,
     )
     datamodule = LSUNBedroomDataModule(batch_size=16, num_workers=12, image_size=512)
     # Start training
