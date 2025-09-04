@@ -5,7 +5,7 @@ import pytorch_lightning as pl
 import torch
 from dotenv import load_dotenv
 
-from config_utils import get_val_config, Config
+from config_utils import Config, get_val_config
 
 load_dotenv()
 torch.set_float32_matmul_precision("high")

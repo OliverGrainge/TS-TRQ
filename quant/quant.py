@@ -1,6 +1,7 @@
+from typing import List, Optional, Set
+
 import torch
 import torch.nn as nn
-from typing import List, Optional, Set
 
 from .layers import QUANT_LAYERS
 
@@ -8,10 +9,10 @@ from .layers import QUANT_LAYERS
 def get_all_linear_names(model: nn.Module) -> List[str]:
     """
     Recursively collect all fully-qualified names of nn.Linear layers in the model.
-    
+
     Args:
         model (nn.Module): The model to search through
-        
+
     Returns:
         List[str]: List of fully-qualified layer names (e.g., ['0.0', '0.1', '1'])
     """
@@ -22,7 +23,7 @@ def get_all_linear_names(model: nn.Module) -> List[str]:
         for name, child in module.named_children():
             # Build the full path name
             full_name = f"{prefix}.{name}" if prefix else name
-            
+
             if isinstance(child, nn.Linear):
                 linear_names.append(full_name)
             else:
@@ -86,7 +87,9 @@ def quantize_model(
     """
     if quant_type not in QUANT_LAYERS:
         available_types = list(QUANT_LAYERS.keys())
-        raise ValueError(f"Invalid quant_type: '{quant_type}'. Available types: {available_types}")
+        raise ValueError(
+            f"Invalid quant_type: '{quant_type}'. Available types: {available_types}"
+        )
 
     quant_layer_class = QUANT_LAYERS[quant_type]
 
@@ -113,10 +116,14 @@ def quantize_model(
             if full_name in target_layers:
                 # Determine which quantization method to use based on quant_type
                 if "linear" in quant_type and isinstance(child, nn.Linear):
-                    quantized_layer = quant_layer_class.from_linear(child, **quant_kwargs)
+                    quantized_layer = quant_layer_class.from_linear(
+                        child, **quant_kwargs
+                    )
                     setattr(module, name, quantized_layer)
                 elif "conv2d" in quant_type and isinstance(child, nn.Conv2d):
-                    quantized_layer = quant_layer_class.from_conv2d(child, **quant_kwargs)
+                    quantized_layer = quant_layer_class.from_conv2d(
+                        child, **quant_kwargs
+                    )
                     setattr(module, name, quantized_layer)
                 else:
                     # If the type does not match, skip quantization for this layer
@@ -151,30 +158,30 @@ if __name__ == "__main__":
     print("=" * 50)
     print("MODEL QUANTIZATION DEMONSTRATION")
     print("=" * 50)
-    
+
     print("\nModel before quantization:")
     print(test_model)
-    
+
     # Get all linear layer names for reference
     all_linear_names = get_all_linear_names(test_model)
     print(f"\nAll linear layers found: {all_linear_names}")
 
     # Make a deep copy for comparison
     original_model = copy.deepcopy(test_model)
-    
+
     # Quantize the model (ignore the first layer in the nested sequential)
     quantized_model = quantize_model(
-        test_model, 
+        test_model,
         quant_type="tlinear",  # Use ternary linear quantization
-        ignore_layers=["0.0"]  # Skip the first linear layer
+        ignore_layers=["0.0"],  # Skip the first linear layer
     )
 
     print("\nModel after quantization:")
     print(quantized_model)
-    
+
     # Test with sample input
     test_input = torch.randn(10, 10)
-    
+
     # Get outputs from both models
     with torch.no_grad():
         original_output = original_model(test_input)
@@ -187,7 +194,7 @@ if __name__ == "__main__":
     print(f"Quantized output shape: {quantized_output.shape}")
     print(f"Mean absolute difference: {output_diff.mean().item():.6f}")
     print(f"Max absolute difference: {output_diff.max().item():.6f}")
-    
+
     print("\n" + "=" * 50)
     print("Quantization completed successfully!")
     print("=" * 50)

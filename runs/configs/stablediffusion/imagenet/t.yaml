@@ -1,0 +1,32 @@
+module_config: 
+    module_type: "stablediffusion" 
+    pretrained: False
+
+datamodule_config: 
+    dataset: "imagenet"
+    batch_size: 16
+    num_workers: 8 
+    image_size: 256
+
+train_config: 
+    accelerator: "auto" 
+    strategy: "auto"
+    precision: "bf16-mixed"
+    max_epochs: 50
+    enable_progress_bar: False
+    val_check_interval: 0.1
+    limit_val_batches: 1000
+
+model_checkpoint_config: 
+    dirpath: "checkpoints/resnet/stable_diffusion/t"
+    filename: t
+
+logger_config:
+  type: "wandb"
+  project: "stable-diffusion"
+  name: "t_qat"
+  save_dir: "logs/"
+  log_model: false
+
+quantization_config:
+  quant_type: "t"

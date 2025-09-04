@@ -35,4 +35,5 @@ for split in ["train", "validation"]:
         f"Downloaded split '{split}' to: {ds.cache_files[0]['filename'] if ds.cache_files else 'unknown location'}"
     )
 
+print(ds)
 print("Download complete.")

@@ -37,7 +37,8 @@ class TLinear(nn.Linear):
 
     @classmethod
     def from_linear(
-        cls, lin: nn.Linear,
+        cls,
+        lin: nn.Linear,
     ):
         mod = cls(
             lin.in_features,
@@ -84,7 +85,6 @@ class TLinear(nn.Linear):
         bias = self.bias.to(x.dtype) if self.bias is not None else None
         return F.linear(x, w_q, bias)
 
-
     def extra_repr(self):
         return (
             f"in_features={self.in_features}, out_features={self.out_features}, "
@@ -95,53 +95,63 @@ class TLinear(nn.Linear):
 if __name__ == "__main__":
     # Example: Create a regular linear layer
     regular_linear = nn.Linear(in_features=10, out_features=5, bias=True)
-    
+
     # Initialize weights with some values
     with torch.no_grad():
         regular_linear.weight.data = torch.randn(5, 10) * 0.1
         regular_linear.bias.data = torch.randn(5) * 0.1
-    
+
     print("Original Linear Layer:")
     print(f"Weight shape: {regular_linear.weight.shape}")
     print(f"Bias shape: {regular_linear.bias.shape}")
-    print(f"Weight stats - Mean: {regular_linear.weight.mean():.4f}, Std: {regular_linear.weight.std():.4f}")
-    
+    print(
+        f"Weight stats - Mean: {regular_linear.weight.mean():.4f}, Std: {regular_linear.weight.std():.4f}"
+    )
+
     # Create TLinear from existing linear layer
     tlinear = TLinear.from_linear(regular_linear)
     print(f"\nTLinear Layer (initialized from existing linear):")
     print(f"Weight shape: {tlinear.weight.shape}")
     print(f"Alpha shape: {tlinear.alpha.shape}")
     print(f"Threshold ratio: {tlinear.thresh_ratio}")
-    
+
     # Create some input data
     batch_size = 4
     x = torch.randn(batch_size, 10)
     print(f"\nInput shape: {x.shape}")
-    
+
     # Forward pass through both layers
     with torch.no_grad():
         regular_output = regular_linear(x)
         tlinear_output = tlinear(x)
-    
+
     print(f"Regular linear output shape: {regular_output.shape}")
     print(f"TLinear output shape: {tlinear_output.shape}")
-    print(f"Regular output stats - Mean: {regular_output.mean():.4f}, Std: {regular_output.std():.4f}")
-    print(f"TLinear output stats - Mean: {tlinear_output.mean():.4f}, Std: {tlinear_output.std():.4f}")
-    
+    print(
+        f"Regular output stats - Mean: {regular_output.mean():.4f}, Std: {regular_output.std():.4f}"
+    )
+    print(
+        f"TLinear output stats - Mean: {tlinear_output.mean():.4f}, Std: {tlinear_output.std():.4f}"
+    )
+
     # Show quantization effect
     print(f"\nQuantization effect:")
-    print(f"Original weight sparsity: {(regular_linear.weight == 0).float().mean():.2%}")
-    
+    print(
+        f"Original weight sparsity: {(regular_linear.weight == 0).float().mean():.2%}"
+    )
+
     # Get quantized weights
     with torch.no_grad():
-        q_nograd, alpha, mask, delta = ternary_quantize(tlinear.weight, tlinear.thresh_ratio)
+        q_nograd, alpha, mask, delta = ternary_quantize(
+            tlinear.weight, tlinear.thresh_ratio
+        )
         q = ste_hard_replace(tlinear.weight, q_nograd)
         w_q = alpha * q
-    
+
     print(f"Quantized weight sparsity: {(w_q == 0).float().mean():.2%}")
     print(f"Alpha values: {alpha.squeeze().tolist()}")
     print(f"Delta values: {delta.squeeze().tolist()}")
-    
+
     # Test with different threshold ratios
     print(f"\nTesting different threshold ratios:")
     for thresh in [0.5, 0.75, 0.9]:
@@ -149,12 +159,13 @@ if __name__ == "__main__":
         tlinear_test.weight.data = regular_linear.weight.data.clone()
         if regular_linear.bias is not None:
             tlinear_test.bias.data = regular_linear.bias.data.clone()
-        
+
         with torch.no_grad():
             tlinear_test._init_weights()
             output = tlinear_test(x)
             q_nograd, _, mask, _ = ternary_quantize(tlinear_test.weight, thresh)
             sparsity = (q_nograd == 0).float().mean()
-        
-        print(f"  Threshold {thresh}: Sparsity {sparsity:.2%}, Output std {output.std():.4f}")
-    
+
+        print(
+            f"  Threshold {thresh}: Sparsity {sparsity:.2%}, Output std {output.std():.4f}"
+        )

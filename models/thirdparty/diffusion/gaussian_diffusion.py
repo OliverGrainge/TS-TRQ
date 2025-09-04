@@ -4,11 +4,11 @@
 #     IDDPM: https://github.com/openai/improved-diffusion/blob/main/improved_diffusion/gaussian_diffusion.py
 
 
+import enum
 import math
 
 import numpy as np
 import torch as th
-import enum
 
 from .diffusion_utils import discretized_gaussian_log_likelihood, normal_kl
 
@@ -736,7 +736,9 @@ class GaussianDiffusion:
         output = th.where((t == 0), decoder_nll, kl)
         return {"output": output, "pred_xstart": out["pred_xstart"]}
 
-    def training_losses(self, model, x_start, t, model_kwargs=None, noise=None, pretrained=True):
+    def training_losses(
+        self, model, x_start, t, model_kwargs=None, noise=None, pretrained=True
+    ):
         """
         Compute training losses for a single timestep.
         :param model: the model to evaluate loss on.
@@ -768,9 +770,9 @@ class GaussianDiffusion:
             if self.loss_type == LossType.RESCALED_KL:
                 terms["loss"] *= self.num_timesteps
         elif self.loss_type == LossType.MSE or self.loss_type == LossType.RESCALED_MSE:
-            if pretrained: 
+            if pretrained:
                 model_output = model(x_t, t, **model_kwargs).sample
-            else: 
+            else:
                 model_output = model(x_t, t, **model_kwargs)
 
             if self.model_var_type in [

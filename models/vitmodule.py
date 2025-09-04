@@ -1,4 +1,4 @@
-from typing import Optional, List, Dict, Any, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
@@ -7,7 +7,6 @@ import torch.nn.functional as F
 from transformers import ViTConfig, ViTForImageClassification
 
 from quant import quantize_model
-
 
 # Constants
 CIFAR_IMAGE_SIZE = 32
@@ -25,11 +24,11 @@ QUANTIZABLE_LAYER_KEYWORDS = ["query", "key", "value", "dense", "intermediate"]
 class ViTModule(pl.LightningModule):
     """
     Vision Transformer (ViT) PyTorch Lightning module with quantization support.
-    
+
     A Lightning module wrapping a Vision Transformer for image classification,
     with support for various quantization methods and training/inference.
     """
-    
+
     def __init__(
         self,
         model_name: str = "Ahmed9275/Vit-Cifar100",
@@ -41,7 +40,7 @@ class ViTModule(pl.LightningModule):
     ) -> None:
         """
         Initialize the ViT module.
-        
+
         Args:
             model_name: Name/path of the pretrained model to load
             num_classes: Number of output classes
@@ -59,10 +58,10 @@ class ViTModule(pl.LightningModule):
 
         # Load pre-trained ViT model or create a new one
         self._load_pretrained_model()
-        
+
         # Adjust classifier if needed
         self._adjust_classifier_if_needed()
-            
+
         # Track quantization state
         self.is_quantized = False
         self.quant_type: Optional[str] = None
@@ -132,7 +131,7 @@ class ViTModule(pl.LightningModule):
     def _get_quant_layer_names(self) -> List[str]:
         """
         Get names of linear layers that can be quantized.
-        
+
         Returns:
             List of layer names suitable for quantization
         """
@@ -147,10 +146,10 @@ class ViTModule(pl.LightningModule):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward pass through the ViT model.
-        
+
         Args:
             x: Input tensor of shape (batch_size, channels, height, width)
-            
+
         Returns:
             Logits tensor of shape (batch_size, num_classes)
         """
@@ -172,10 +171,10 @@ class ViTModule(pl.LightningModule):
     def reg_loss(self, reduction: str = "mean") -> torch.Tensor:
         """
         Compute regularization loss from quantized layers.
-        
+
         Args:
             reduction: Reduction method ("mean" or "sum")
-            
+
         Returns:
             Regularization loss tensor
         """
@@ -187,20 +186,20 @@ class ViTModule(pl.LightningModule):
             fn = getattr(m, "layer_reg_loss", None)
             if callable(fn):
                 losses.append(fn())
-                
+
         if not losses:
             return torch.tensor(0.0, device=self.device)
-            
+
         losses = torch.stack([torch.as_tensor(l, device=self.device) for l in losses])
         return losses.mean() if reduction == "mean" else losses.sum()
 
     def lr_scalars_magnitude(self, reduction: str = "mean") -> torch.Tensor:
         """
         Compute magnitude statistics of lr_scalars from TSVDLinear layers.
-        
+
         Args:
             reduction: Reduction method ("mean", "max", "std")
-            
+
         Returns:
             Magnitude statistics tensor
         """
@@ -223,13 +222,11 @@ class ViTModule(pl.LightningModule):
         return hasattr(module, "lr_scalars") and hasattr(module, "rank")
 
     def _compute_magnitude_reduction(
-        self, 
-        magnitudes: List[torch.Tensor], 
-        reduction: str
+        self, magnitudes: List[torch.Tensor], reduction: str
     ) -> torch.Tensor:
         """Compute reduction over magnitude tensors."""
         all_magnitudes = torch.cat(magnitudes)
-        
+
         if reduction == "mean":
             return all_magnitudes.mean()
         elif reduction == "max":
@@ -244,7 +241,7 @@ class ViTModule(pl.LightningModule):
         Estimate the relative contribution of the ternary (quantized) weights vs. the low-rank correction
         in TSVDLinear layers, by comparing the mean absolute value of the ternary part (alpha * q)
         to the mean absolute value of the low-rank correction (lr_scalars * L @ R).
-        
+
         Returns:
             Ratio of ternary to low-rank contributions
         """
@@ -260,21 +257,23 @@ class ViTModule(pl.LightningModule):
         mean_lowrank = torch.cat(lowrank_vals).mean()
         return mean_ternary / (mean_lowrank + EPSILON_STABILIZER)
 
-    def _compute_ternary_and_lowrank_values(self) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
+    def _compute_ternary_and_lowrank_values(
+        self,
+    ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
         """Compute ternary and low-rank values for ratio calculation."""
         ternary_vals = []
         lowrank_vals = []
-        
+
         for m in self.vit.modules():
             if self._has_tsvd_components(m):
                 ternary_part = self._compute_ternary_part(m)
                 if ternary_part is not None:
                     ternary_vals.append(ternary_part.flatten())
-                
+
                 lowrank_part = self._compute_lowrank_part(m)
                 if lowrank_part is not None:
                     lowrank_vals.append(lowrank_part.flatten())
-                    
+
         return ternary_vals, lowrank_vals
 
     def _has_tsvd_components(self, module: torch.nn.Module) -> bool:
@@ -297,7 +296,7 @@ class ViTModule(pl.LightningModule):
         L = self._to_device_and_dtype(module.L)
         R = self._to_device_and_dtype(module.R)
         lr_scalars = self._to_device_and_dtype(module.lr_scalars)
-        
+
         if L.numel() > 0 and R.numel() > 0:
             lowrank = (lr_scalars * L) @ R
             return lowrank.abs()
@@ -308,14 +307,16 @@ class ViTModule(pl.LightningModule):
         target_dtype = self.dtype if hasattr(self, "dtype") else tensor.dtype
         return tensor.to(device=self.device, dtype=target_dtype)
 
-    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         """
         Training step for the ViT model.
-        
+
         Args:
             batch: Tuple of (images, labels)
             batch_idx: Batch index
-            
+
         Returns:
             Total training loss
         """
@@ -342,18 +343,20 @@ class ViTModule(pl.LightningModule):
 
         return total_loss
 
-    def _compute_accuracy(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    def _compute_accuracy(
+        self, logits: torch.Tensor, labels: torch.Tensor
+    ) -> torch.Tensor:
         """Compute classification accuracy."""
         preds = torch.argmax(logits, dim=1)
         return (preds == labels).float().mean()
 
     def _log_training_metrics(
-        self, 
-        loss: torch.Tensor, 
-        total_loss: torch.Tensor, 
-        rloss: torch.Tensor, 
-        acc: torch.Tensor, 
-        current_lr: float
+        self,
+        loss: torch.Tensor,
+        total_loss: torch.Tensor,
+        rloss: torch.Tensor,
+        acc: torch.Tensor,
+        current_lr: float,
     ) -> None:
         """Log training metrics."""
         log_dict = {
@@ -381,14 +384,16 @@ class ViTModule(pl.LightningModule):
             "ternary_lr_ratio": self.ternary_vs_lr_ratio(),
         }
 
-    def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict[str, torch.Tensor]:
+    def validation_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
         """
         Validation step for the ViT model.
-        
+
         Args:
             batch: Tuple of (images, labels)
             batch_idx: Batch index
-            
+
         Returns:
             Dictionary containing validation metrics
         """
@@ -406,14 +411,16 @@ class ViTModule(pl.LightningModule):
 
         return {"val_loss": loss, "val_acc": acc}
 
-    def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> Dict[str, torch.Tensor]:
+    def test_step(
+        self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int
+    ) -> Dict[str, torch.Tensor]:
         """
         Test step for the ViT model.
-        
+
         Args:
             batch: Tuple of (images, labels)
             batch_idx: Batch index
-            
+
         Returns:
             Dictionary containing test metrics
         """
@@ -434,7 +441,7 @@ class ViTModule(pl.LightningModule):
     def configure_optimizers(self) -> torch.optim.Optimizer:
         """
         Configure optimizer for ViT training.
-        
+
         Returns:
             Configured AdamW optimizer
         """

@@ -1,15 +1,17 @@
 import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 import pytorch_lightning as pl
 import torch
-from dotenv import load_dotenv
-from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
-from pathlib import Path
-import sys
-from typing import Dict, Any, Optional
 import yaml
-from config_utils import get_train_config, Config
+from dotenv import load_dotenv
+
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
+
+from config_utils import Config
 
 load_dotenv()
 torch.set_float32_matmul_precision("high")
@@ -66,7 +68,7 @@ def format_config_value(value):
 def print_config(config: Config):
     """Print configuration in a nicely formatted way"""
     print_header("TRAINING CONFIGURATION")
-    
+
     # Get all configuration sections
     sections = [
         ("Module Config", getattr(config, "module_config", {})),
@@ -76,7 +78,7 @@ def print_config(config: Config):
         ("Logger Config", getattr(config, "logger_config", {})),
         ("Quantization Config", getattr(config, "quantization_config", {})),
     ]
-    
+
     for section_name, section_config in sections:
         if section_config:  # Only print non-empty sections
             print_section(section_name)
@@ -107,35 +109,45 @@ def format_parameter_count(count: int) -> str:
 def print_model_info(module: pl.LightningModule):
     """Print model information in a nicely formatted way"""
     print_header("MODEL INFORMATION")
-    
+
     # Basic model info
     print_section("Model Details")
     print(f"  Model Type        : {type(module).__name__}")
-    
+
     # Parameter counts
     total_params, trainable_params = count_parameters(module)
-    print(f"  Total Parameters  : {format_parameter_count(total_params)} ({total_params:,})")
-    print(f"  Trainable Params  : {format_parameter_count(trainable_params)} ({trainable_params:,})")
-    
+    print(
+        f"  Total Parameters  : {format_parameter_count(total_params)} ({total_params:,})"
+    )
+    print(
+        f"  Trainable Params  : {format_parameter_count(trainable_params)} ({trainable_params:,})"
+    )
+
     # Device and dtype info
-    device = next(module.parameters()).device if len(list(module.parameters())) > 0 else "N/A"
-    dtype = next(module.parameters()).dtype if len(list(module.parameters())) > 0 else "N/A"
+    device = (
+        next(module.parameters()).device
+        if len(list(module.parameters())) > 0
+        else "N/A"
+    )
+    dtype = (
+        next(module.parameters()).dtype if len(list(module.parameters())) > 0 else "N/A"
+    )
     print(f"  Device            : {device}")
     print(f"  Data Type         : {dtype}")
-    
+
     # Model-specific info
-    if hasattr(module, 'is_quantized'):
+    if hasattr(module, "is_quantized"):
         print(f"  Quantized         : {module.is_quantized}")
-        if module.is_quantized and hasattr(module, 'quant_type'):
+        if module.is_quantized and hasattr(module, "quant_type"):
             print(f"  Quantization Type : {module.quant_type}")
-    
-    if hasattr(module, 'pretrained'):
+
+    if hasattr(module, "pretrained"):
         print(f"  Pretrained        : {module.pretrained}")
-    
-    if hasattr(module, 'image_size'):
+
+    if hasattr(module, "image_size"):
         print(f"  Image Size        : {module.image_size}")
-    
-    if hasattr(module, 'learning_rate'):
+
+    if hasattr(module, "learning_rate"):
         print(f"  Learning Rate     : {module.learning_rate}")
 
     # Print model architecture
@@ -147,36 +159,44 @@ def print_training_start_info(datamodule, logger):
     """Print information about the training setup"""
     datamodule.setup()
     print_header("TRAINING SETUP")
-    
+
     # Dataset info
     print_section("Dataset Information")
-    if hasattr(datamodule, 'num_classes'):
+    if hasattr(datamodule, "num_classes"):
         print(f"  Number of Classes : {datamodule.num_classes}")
-    
+
     # Try to get dataset sizes
     try:
         datamodule.setup()
-        train_size = len(datamodule.train_dataloader().dataset) if hasattr(datamodule.train_dataloader(), 'dataset') else "Unknown"
-        batch_size = datamodule.train_dataloader().batch_size if hasattr(datamodule.train_dataloader(), 'batch_size') else "Unknown"
+        train_size = (
+            len(datamodule.train_dataloader().dataset)
+            if hasattr(datamodule.train_dataloader(), "dataset")
+            else "Unknown"
+        )
+        batch_size = (
+            datamodule.train_dataloader().batch_size
+            if hasattr(datamodule.train_dataloader(), "batch_size")
+            else "Unknown"
+        )
         print(f"  Training Samples  : {train_size}")
         print(f"  Batch Size        : {batch_size}")
-        
+
         if train_size != "Unknown" and batch_size != "Unknown":
             steps_per_epoch = train_size // batch_size
             print(f"  Steps per Epoch   : {steps_per_epoch}")
     except:
         print(f"  Training Samples  : Unknown")
-    
+
     # Logger info
     print_section("Logging Setup")
     logger_type = type(logger).__name__
     print(f"  Logger Type       : {logger_type}")
-    
-    if hasattr(logger, 'save_dir'):
+
+    if hasattr(logger, "save_dir"):
         print(f"  Save Directory    : {logger.save_dir}")
-    if hasattr(logger, 'name'):
+    if hasattr(logger, "name"):
         print(f"  Experiment Name   : {logger.name}")
-    if hasattr(logger, 'project'):
+    if hasattr(logger, "project"):
         print(f"  Project           : {logger.project}")
 
 
@@ -200,13 +220,22 @@ def get_module(module_config):
             return ViTModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return ViTModule(**module_config)
-    elif module_type == "resnet": 
+    elif module_type == "resnet":
         from models import ResNetModule
-        checkpoint = module_config.pop("checkpoint", None) 
-        if checkpoint is not None: 
+
+        checkpoint = module_config.pop("checkpoint", None)
+        if checkpoint is not None:
             return ResNetModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return ResNetModule(**module_config)
+    elif module_type == "stablediffusion":
+        from models import StableDiffusionModule
+
+        checkpoint = module_config.pop("checkpoint", None)
+        if checkpoint is not None:
+            return StableDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+        else:
+            return StableDiffusionModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
 
@@ -223,8 +252,8 @@ def get_datamodule(datamodule_config):
         from data import CIFAR100DataModule
 
         return CIFAR100DataModule(**datamodule_config)
-    elif dataset == "cifar10": 
-        from data import CIFAR10DataModule 
+    elif dataset == "cifar10":
+        from data import CIFAR10DataModule
 
         return CIFAR10DataModule(**datamodule_config)
     else:
@@ -235,7 +264,11 @@ def create_model_checkpoint_callback(model_checkpoint_config):
     """Create ModelCheckpoint callback from configuration"""
     from pathlib import Path
 
-    filename_prefix = model_checkpoint_config.pop("filename_prefix", "") if "filename_prefix" in model_checkpoint_config else ""
+    filename_prefix = (
+        model_checkpoint_config.pop("filename_prefix", "")
+        if "filename_prefix" in model_checkpoint_config
+        else ""
+    )
 
     # Set defaults if not provided
     config = {
@@ -251,25 +284,25 @@ def create_model_checkpoint_callback(model_checkpoint_config):
 
 def create_logger(logger_config, config_dict=None):
     """Create logger from configuration
-    
+
     Supports both WandB and TensorBoard loggers based on configuration.
-    
+
     Args:
         logger_config: Dictionary containing logger configuration
         config_dict: Optional full configuration to log as hyperparameters
-        
+
     Returns:
         Configured logger instance
-        
+
     Example logger_config:
         # For WandB
         {
             "type": "wandb",
-            "project": "my-project", 
+            "project": "my-project",
             "name": "experiment-1"
         }
-        
-        # For TensorBoard  
+
+        # For TensorBoard
         {
             "type": "tensorboard",
             "save_dir": "./logs",
@@ -277,19 +310,21 @@ def create_logger(logger_config, config_dict=None):
         }
     """
     logger_type = logger_config.get("type", "wandb").lower()
-    
+
     if logger_type == "wandb":
         logger_kwargs = {k: v for k, v in logger_config.items() if k != "type"}
         logger = WandbLogger(**logger_kwargs)
-        
+
         # Log the full configuration as hyperparameters
         if config_dict is not None:
             logger.log_hyperparams(flatten_dict(config_dict))
-            
+
         return logger
 
     else:
-        raise ValueError(f"Unsupported logger type: {logger_type}. Supported types: 'wandb'")
+        raise ValueError(
+            f"Unsupported logger type: {logger_type}. Supported types: 'wandb'"
+        )
 
 
 def main():
@@ -297,7 +332,7 @@ def main():
     # Load configuration from YAML file
     if len(sys.argv) < 2:
         raise ValueError("Please provide a configuration file path as argument")
-        
+
     config_path = sys.argv[1]
     config_dict = load_config(config_path)
     config = Config(config_dict)

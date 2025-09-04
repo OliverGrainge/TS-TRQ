@@ -1,3 +1,4 @@
 from .ditmodule import DiTModule
-from .vitmodule import ViTModule
 from .resnetmodule import ResNetModule
+from .sdmodule import StableDiffusionModule
+from .vitmodule import ViTModule
