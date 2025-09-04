@@ -30,12 +30,16 @@ from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
 
 
 
-def load_stable_diffusion(): 
+def load_stable_diffusion(pretrained: bool=True): 
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE")
     vae = AutoencoderKL.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="vae", cache_dir=cache_dir) 
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14", cache_dir=cache_dir)
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14", cache_dir=cache_dir)
-    unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet", cache_dir=cache_dir)
+    if pretrained:
+        unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet", cache_dir=cache_dir)
+    else: 
+        unet = UNet2DConditionModel.from_config("CompVis/stable-diffusion-v1-4", subfolder="unet", cache_dir=cache_dir)
+
     train_noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_start=0.00085,
@@ -58,6 +62,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         max_train_steps: int = 500000,
         gradient_checkpointing: bool = True,
         train_text_encoder: bool = False,
+        pretrained: bool = True,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -239,14 +244,13 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         )
 
         layer_names = self._get_quant_conv2d_layer_names()
-        layer_names = ["up_blocks.2.resnets.2.conv1"]
         self.unet = quantize_model(
             self.unet, layer_names=layer_names, quant_type=self._update_quant_type(quant_type, "conv2d"), **quant_kwargs
         )
-        #layer_names = self._get_quant_linear_layer_names()[
-        #self.unet = quantize_model(
-        #    self.unet, layer_names=layer_names, quant_type=self._update_quant_type(quant_type, "linear"), **quant_kwargs
-        #)
+        layer_names = self._get_quant_linear_layer_names()
+        self.unet = quantize_model(
+            self.unet, layer_names=layer_names, quant_type=self._update_quant_type(quant_type, "linear"), **quant_kwargs
+        )
         # Update quantization state
         self.is_quantized = True
         self.quant_type = quant_type
@@ -603,6 +607,7 @@ def main():
     # Initialize model
     model = StableDiffusionTrainingModule()
     model.apply_quantization("t")
+    print(model)
     
     # Setup logger (optional)
     logger = WandbLogger(project="stable-diffusion-training")
@@ -618,7 +623,7 @@ def main():
         limit_val_batches=50, 
         val_check_interval=500,
     )
-    datamodule = LSUNBedroomDataModule(batch_size=16, num_workers=12, image_size=512)
+    datamodule = LSUNBedroomDataModule(batch_size=32, num_workers=12, image_size=512)
     # Start training
     trainer.fit(model, datamodule)
     
