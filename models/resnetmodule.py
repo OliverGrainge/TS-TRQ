@@ -70,8 +70,9 @@ class ResNetModule(LightningModule):
         return self.model(x).logits 
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        images, labels = batch
-        logits = self(images)
+        pixel_values = batch['pixel_values']
+        labels = batch['labels']
+        logits = self(pixel_values)
         ce_loss = F.cross_entropy(logits, labels)
         reg_loss = self.reg_loss()
         train_loss = ce_loss + reg_loss
@@ -84,8 +85,9 @@ class ResNetModule(LightningModule):
         return train_loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        images, labels = batch
-        logits = self(images)
+        pixel_values = batch['pixel_values']
+        labels = batch['labels']
+        logits = self(pixel_values)
         loss = F.cross_entropy(logits, labels)
         preds = torch.argmax(logits, dim=1)
         acc = (preds == labels).float().mean()
@@ -94,8 +96,9 @@ class ResNetModule(LightningModule):
         return loss
 
     def test_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        images, labels = batch
-        logits = self(images)
+        pixel_values = batch['pixel_values']
+        labels = batch['labels']
+        logits = self(pixel_values)
         loss = F.cross_entropy(logits, labels)
         preds = torch.argmax(logits, dim=1)
         acc = (preds == labels).float().mean()

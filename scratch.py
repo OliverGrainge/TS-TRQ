@@ -10,13 +10,15 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from typing import Any 
 from typing import Union
-
+from tqdm import tqdm
+import torch 
 from diffusers import (
     UNet2DConditionModel, 
     DDPMScheduler, 
     AutoencoderKL,
 )
 from diffusers.optimization import get_scheduler
+from diffusers import LMSDiscreteScheduler
 from transformers import CLIPTextModel, CLIPTokenizer
 from PIL import Image
 import torchvision.transforms as transforms
@@ -24,7 +26,7 @@ import os
 from typing import Optional, List, Tuple
 from data import LSUNBedroomDataModule
 from diffusers import DiffusionPipeline
-from quant import quantize_model, get_all_conv2d_names
+from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
 
 
 
@@ -34,14 +36,16 @@ def load_stable_diffusion():
     tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14", cache_dir=cache_dir)
     text_encoder = CLIPTextModel.from_pretrained("openai/clip-vit-large-patch14", cache_dir=cache_dir)
     unet = UNet2DConditionModel.from_pretrained("CompVis/stable-diffusion-v1-4", subfolder="unet", cache_dir=cache_dir)
-    noise_scheduler = DDPMScheduler(
+    train_noise_scheduler = DDPMScheduler(
             num_train_timesteps=1000,
             beta_start=0.00085,
             beta_end=0.012,
             beta_schedule="scaled_linear",
             prediction_type="epsilon"
         )
-    return {"vae": vae, "text_encoder": text_encoder, "tokenizer": tokenizer, "unet": unet, "noise_scheduler": noise_scheduler}
+    inference_noise_scheduler = LMSDiscreteScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000)
+
+    return {"vae": vae, "text_encoder": text_encoder, "tokenizer": tokenizer, "unet": unet, "train_noise_scheduler": train_noise_scheduler, "inference_noise_scheduler": inference_noise_scheduler}
 
 
 
@@ -54,7 +58,6 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         max_train_steps: int = 500000,
         gradient_checkpointing: bool = True,
         train_text_encoder: bool = False,
-        resolution: int = 128,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -64,6 +67,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         self.lr_warmup_steps = lr_warmup_steps
         self.max_train_steps = max_train_steps
         self.train_text_encoder = train_text_encoder
+        self.is_quantized = False
         
         # Load the models
         model_dict = load_stable_diffusion()
@@ -72,8 +76,9 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         self.tokenizer = model_dict["tokenizer"]
         self.unet = model_dict["unet"]
         
-        # Scheduler for training
-        self.noise_scheduler = model_dict["noise_scheduler"]
+        # Scheduler for noise
+        self.train_noise_scheduler = model_dict["train_noise_scheduler"]
+        self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
         
         # Freeze VAE and text encoder (unless specified otherwise)
         self.vae.requires_grad_(False)
@@ -115,18 +120,18 @@ class StableDiffusionTrainingModule(pl.LightningModule):
             latents = self.vae.encode(pixel_values).latent_dist.sample()
             latents = latents * self.vae.config.scaling_factor
             latents = latents.to(self.device)
-            assert latents.shape[1] == self.unet.in_channels
+            assert latents.shape[1] == self.unet.config.in_channels
         
         # Sample noise and timesteps
         noise = torch.randn_like(latents)
         bsz = latents.shape[0]
         timesteps = torch.randint(
-            0, self.noise_scheduler.config.num_train_timesteps, 
+            0, self.train_noise_scheduler.config.num_train_timesteps, 
             (bsz,), device=latents.device
         ).long()
         
         # Add noise to latents according to noise magnitude at each timestep
-        noisy_latents = self.noise_scheduler.add_noise(latents, noise, timesteps)
+        noisy_latents = self.train_noise_scheduler.add_noise(latents, noise, timesteps)
         
         # Get text embeddings - handle both conditional and unconditional cases
         # Use actual captions instead of hardcoded string
@@ -152,9 +157,15 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         model_pred, target = self.forward(pixel_values, captions)
         
         # Calculate loss
-        loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+        mse_loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+        reg_loss = self.reg_loss()
+        loss = mse_loss + reg_loss
         
-        self.log("train_loss", loss, prog_bar=True)
+        self.log("mse_loss", loss, prog_bar=True)
+        self.log("reg_loss", reg_loss)
+        self.log("train_loss", loss)
+        if self.global_step % 100 == 0:
+            self.log_stats()
         return loss
     
     def validation_step(self, batch, batch_idx):
@@ -170,6 +181,11 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         
         self.log("val_loss", loss, prog_bar=True)
         return loss
+
+    def on_validation_epoch_end(self): 
+        imgs = self.generate(batch_size=4, height=512, width=512, num_inference_steps=100, guidance_scale=7.5)
+        # generate() returns a list of PIL Images, so we pass it directly
+        self.logger.log_image(key="samples", images=imgs)
     
     def configure_optimizers(self):
         # Determine which parameters to optimize
@@ -222,26 +238,60 @@ class StableDiffusionTrainingModule(pl.LightningModule):
             f"Applying {quant_type} quantization to model with kwargs: {quant_kwargs}"
         )
 
-        try:
-            # Get linear layer names for quantization
-            layer_names = self._get_quant_layer_names()
-            self.model = quantize_model(
-                self.model, layer_names=layer_names, quant_type=quant_type, **quant_kwargs
-            )
-            # Update quantization state
-            self.is_quantized = True
-            self.quant_type = quant_type
-            self.quant_kwargs = quant_kwargs
+        layer_names = self._get_quant_conv2d_layer_names()
+        layer_names = ["up_blocks.2.resnets.2.conv1"]
+        self.unet = quantize_model(
+            self.unet, layer_names=layer_names, quant_type=self._update_quant_type(quant_type, "conv2d"), **quant_kwargs
+        )
+        #layer_names = self._get_quant_linear_layer_names()[
+        #self.unet = quantize_model(
+        #    self.unet, layer_names=layer_names, quant_type=self._update_quant_type(quant_type, "linear"), **quant_kwargs
+        #)
+        # Update quantization state
+        self.is_quantized = True
+        self.quant_type = quant_type
+        self.quant_kwargs = quant_kwargs
+    
+    def _update_quant_type(self, quant_type: str, layer_type: str):
+        if "tsvd" in quant_type and layer_type == "conv2d":
+            quant_type = "tsvdconv2d"
+        elif "tsvd" in quant_type and layer_type == "linear":
+            quant_type = "tsvdlinear"
+        elif "t" in quant_type and layer_type == "conv2d":
+            quant_type = "tconv2d"
+        elif "t" in quant_type and layer_type == "linear":
+            quant_type = "tlinear"
+        return quant_type
 
-            print(f"Quantization applied successfully.")
-        except Exception as e:
-            print(f"Failed to apply quantization: {e}")
-            raise
-
-    def _get_quant_layer_names(self) -> List[str]: 
-        all_convs = get_all_conv2d_names(self.model)
-        convs = [l for l in all_convs if "embedder.embedder" not in l]
+    def _get_quant_conv2d_layer_names(self) -> List[str]: 
+        ignore_layers = [
+            "conv_in", "conv_out", "conv_norm_out",
+            "time_proj", "time_embedding", "time_emb_proj",
+            "Downsample2D.conv", "Upsample2D.conv",
+            "conv_shortcut",
+            ".norm", "GroupNorm", "LayerNorm",
+            "attn2.to_k", "attn2.to_v"
+        ]
+        all_convs = get_all_conv2d_names(self.unet)
+        convs = [l for l in all_convs if not any(x in l for x in ignore_layers)]
         return convs
+
+    def _get_quant_linear_layer_names(self) -> List[str]: 
+        """
+        Returns a list of linear layer names in self.unet to be quantized,
+        excluding those that match any of the ignore patterns.
+        """
+        ignore_layers = [
+            "conv_in", "conv_out", "conv_norm_out",
+            "time_proj", "time_embedding", "time_emb_proj",
+            "Downsample2D.conv", "Upsample2D.conv",
+            "conv_shortcut",
+            ".norm", "GroupNorm", "LayerNorm",
+            "attn2.to_k", "attn2.to_v"
+        ]
+        all_lines = get_all_linear_names(self.unet)
+        lines = [l for l in all_lines if not any(x in l for x in ignore_layers)]
+        return lines
 
     def reg_loss(self, reduction: str = "mean") -> torch.Tensor:
         """
@@ -257,7 +307,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
             return torch.tensor(0.0, device=self.device)
 
         losses = []
-        for m in self.model.modules():
+        for m in self.unet.modules():
             fn = getattr(m, "layer_reg_loss", None)
             if callable(fn):
                 losses.append(fn())
@@ -292,7 +342,7 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         ratios = []
         
         # Compute ratio for each TSVD layer
-        for module in self.model.modules():
+        for module in self.unet.modules():
             if self._is_tsvd_layer(module):
                 ratio = self._compute_layer_ratio(module)
                 if ratio is not None:
@@ -361,12 +411,198 @@ class StableDiffusionTrainingModule(pl.LightningModule):
                 self.log(f"ternary_vs_LR_ratio/{key}", value, prog_bar=True)
         return ratios
 
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt: Union[str, List[str], None] = None,
+        height: int = 512,
+        width: int = 512,
+        num_inference_steps: int = 50,
+        guidance_scale: float = 7.5,
+        negative_prompt: Union[str, List[str], None] = None,
+        generator: Optional[torch.Generator] = None,
+        return_pil: bool = True,
+        batch_size: int = 1,
+        pbar: bool=False
+    ):
+        """
+        Generate images from text prompts using the trained model.
+        
+        Args:
+            prompt: Text prompt(s) to generate images from. If None, performs unconditional generation
+            height: Height of generated images (default: 512)
+            width: Width of generated images (default: 512)  
+            num_inference_steps: Number of denoising steps (default: 50)
+            guidance_scale: Scale for classifier-free guidance (default: 7.5, ignored for unconditional)
+            negative_prompt: Negative prompt(s) for guidance (optional, ignored for unconditional)
+            generator: Random generator for reproducible results (optional)
+            return_pil: Whether to return PIL images or tensor (default: True)
+            batch_size: Number of images to generate (only used when prompt is None)
+            
+        Returns:
+            List of PIL Images or tensor depending on return_pil parameter
+        """
+        # Ensure we're in eval mode
+        self.eval()
+
+        # Determine device: use GPU if available, else CPU
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # Move model components to the correct device if not already there
+        self.to(device)
+        if hasattr(self, "vae"):
+            self.vae.to(device)
+        if hasattr(self, "unet"):
+            self.unet.to(device)
+        if hasattr(self, "text_encoder"):
+            self.text_encoder.to(device)
+
+        # Use inference scheduler if available, otherwise use training scheduler
+        scheduler = self.inference_noise_scheduler if self.inference_noise_scheduler is not None else self.train_noise_scheduler
+
+        # Determine if this is conditional or unconditional generation
+        if prompt is None:
+            # Unconditional generation
+            is_conditional = False
+            effective_batch_size = batch_size
+
+            # Create unconditional embeddings (empty prompts)
+            uncond_input = self.tokenizer(
+                [""] * effective_batch_size, 
+                padding="max_length", 
+                max_length=self.tokenizer.model_max_length, 
+                return_tensors="pt"
+            )
+            uncond_input = {k: v.to(device) for k, v in uncond_input.items()}
+            text_embeddings = self.text_encoder(uncond_input["input_ids"])[0]
+        else:
+            # Conditional generation
+            is_conditional = True
+
+            # Handle single prompt
+            if isinstance(prompt, str):
+                prompt = [prompt]
+
+            effective_batch_size = len(prompt)
+
+            # Encode prompts
+            text_input = self.tokenizer(
+                prompt, 
+                padding="max_length", 
+                max_length=self.tokenizer.model_max_length, 
+                truncation=True, 
+                return_tensors="pt"
+            )
+            text_input = {k: v.to(device) for k, v in text_input.items()}
+            text_embeddings = self.text_encoder(text_input["input_ids"])[0]
+
+            # Handle negative prompts for classifier-free guidance
+            if negative_prompt is not None:
+                if isinstance(negative_prompt, str):
+                    negative_prompt = [negative_prompt] * effective_batch_size
+                elif len(negative_prompt) != effective_batch_size:
+                    raise ValueError(f"Length of negative_prompt ({len(negative_prompt)}) must match batch_size ({effective_batch_size})")
+                
+                uncond_input = self.tokenizer(
+                    negative_prompt,
+                    padding="max_length",
+                    max_length=self.tokenizer.model_max_length,
+                    truncation=True,
+                    return_tensors="pt"
+                )
+            else:
+                # Use empty prompts for unconditional part of CFG
+                uncond_input = self.tokenizer(
+                    [""] * effective_batch_size, 
+                    padding="max_length", 
+                    max_length=self.tokenizer.model_max_length, 
+                    return_tensors="pt"
+                )
+            uncond_input = {k: v.to(device) for k, v in uncond_input.items()}
+            uncond_embeddings = self.text_encoder(uncond_input["input_ids"])[0]
+
+            # Concatenate for classifier-free guidance
+            text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
+
+        # Create initial latent noise
+        latents_shape = (effective_batch_size, self.unet.in_channels, height // 8, width // 8)
+        latents = torch.randn(
+            latents_shape,
+            generator=generator,
+            device=device,
+            dtype=text_embeddings.dtype,
+        )
+
+        # Set timesteps
+        scheduler.set_timesteps(num_inference_steps, device=device)
+        timesteps = scheduler.timesteps
+
+        # Scale initial noise
+        latents = latents * scheduler.init_noise_sigma
+
+        # Denoising loop
+        for i, t in tqdm(enumerate(timesteps), total=len(timesteps), disable=not pbar):
+            if is_conditional:
+                # Conditional generation with classifier-free guidance
+                # Expand latents for classifier-free guidance
+                latent_model_input = torch.cat([latents] * 2)
+                latent_model_input = latent_model_input.to(device)
+                latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
+
+                # Predict noise residual
+                noise_pred = self.unet(
+                    latent_model_input, 
+                    t, 
+                    encoder_hidden_states=text_embeddings
+                ).sample
+
+                # Perform classifier-free guidance
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+            else:
+                # Unconditional generation - no classifier-free guidance
+                latent_model_input = latents.to(device)
+                latent_model_input = scheduler.scale_model_input(latent_model_input, timestep=t)
+
+                # Predict noise residual
+                noise_pred = self.unet(
+                    latent_model_input, 
+                    t, 
+                    encoder_hidden_states=text_embeddings
+                ).sample
+
+            # Compute previous sample
+            latents = scheduler.step(noise_pred, t, latents).prev_sample
+
+        # Decode latents to images
+        # Scale latents back to original scale
+        latents = latents.to(device)
+        if hasattr(self.vae.config, 'scaling_factor'):
+            latents = latents / self.vae.config.scaling_factor
+        else:
+            latents = latents / 0.18215
+
+        images = self.vae.decode(latents).sample
+
+        # Post-process images
+        images = (images / 2 + 0.5).clamp(0, 1)
+
+        if return_pil:
+            # Convert to PIL images
+            images = images.detach().cpu().permute(0, 2, 3, 1).numpy()
+            images = (images * 255).round().astype("uint8")
+            from PIL import Image
+            pil_images = [Image.fromarray(image) for image in images]
+            return pil_images
+        else:
+            return images
 def main():
     # Configuration
     
     # Initialize model
     model = StableDiffusionTrainingModule()
-
+    model.apply_quantization("t")
     
     # Setup logger (optional)
     logger = WandbLogger(project="stable-diffusion-training")
