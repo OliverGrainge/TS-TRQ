@@ -15,12 +15,11 @@ train_config:
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    max_epochs: 10
+    max_epochs: 50
     enable_progress_bar: true
-    val_check_interval: 0.5
 
 model_checkpoint_config: 
-    dirpath: "checkpoints/resnet/resnet18_cifar100"
+    dirpath: "checkpoints/resnet/resnet18_cifar100/linear_untrained"
     filename: resnet18_cifar100
 
 logger_config:

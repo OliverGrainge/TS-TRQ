@@ -15,14 +15,13 @@ train_config:
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    max_epochs: 10 
+    max_epochs: 50
     enable_progress_bar: true
-    val_check_interval: 0.5
 
 
 model_checkpoint_config: 
-    dirpath: "checkpoints/resnet/resnet18_cifar100"
-    filename: resnet18_cifar100
+    dirpath: "checkpoints/resnet/resnet18_cifar100/tsvdlinear"
+    filename: tsvdlinear
 
 logger_config:
   type: "wandb"
@@ -33,6 +32,6 @@ logger_config:
  
 quantization_config:
   quant_type: "tsvdconv2d"
-  reg_scale: 16.0
+  reg_scale: 4.0
   reg_type: "l2"
   rank: 16
