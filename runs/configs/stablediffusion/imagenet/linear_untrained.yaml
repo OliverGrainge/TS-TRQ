@@ -4,7 +4,7 @@ module_config:
 
 datamodule_config: 
     dataset: "imagenet"
-    batch_size: 16
+    batch_size: 64
     num_workers: 8 
     image_size: 256
 
@@ -13,7 +13,7 @@ train_config:
     strategy: "auto"
     precision: "bf16-mixed"
     max_epochs: 50
-    enable_progress_bar: True
+    enable_progress_bar: False
     val_check_interval: 0.1
     limit_val_batches: 1000
 
