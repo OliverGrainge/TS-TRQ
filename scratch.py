@@ -314,14 +314,41 @@ class StableDiffusionTrainingModule(pl.LightningModule):
         return quant_type
 
     def _get_quant_conv2d_layer_names(self) -> List[str]:
+        """Conservative quantization - avoid the biggest, deepest layers that consume most memory."""
         ignore = [
+            # Absolutely critical
             "conv_in", "conv_out", "conv_norm_out",
             "time_proj", "time_embedding", "time_emb_proj",
             "Downsample2D.conv", "Upsample2D.conv",
             "conv_shortcut",
             ".norm", "GroupNorm", "LayerNorm",
             "attn2.to_k", "attn2.to_v",
+            "proj_in", "proj_out",
+            
+            # NEW: Avoid the biggest, deepest conv layers
+            # These are the 1280-channel layers (deepest, biggest memory)
+            "down_blocks.2.resnets.0.conv1",  # 640→1280
+            "down_blocks.2.resnets.0.conv2",  # 1280→1280
+            "down_blocks.2.resnets.1.conv1",  # 1280→1280  
+            "down_blocks.2.resnets.1.conv2",  # 1280→1280
+            
+            "up_blocks.0.resnets.0.conv1",    # 2560→1280
+            "up_blocks.0.resnets.0.conv2",    # 1280→1280
+            "up_blocks.0.resnets.1.conv1",    # 1920→1280
+            "up_blocks.0.resnets.1.conv2",    # 1280→1280
+            
+            # Also avoid the 640-channel layers (second biggest)
+            "down_blocks.1.resnets.0.conv1",  # 320→640
+            "down_blocks.1.resnets.0.conv2",  # 640→640
+            "down_blocks.1.resnets.1.conv1",  # 640→640
+            "down_blocks.1.resnets.1.conv2",  # 640→640
+            
+            "up_blocks.1.resnets.0.conv1",    # 1920→640
+            "up_blocks.1.resnets.0.conv2",    # 640→640
+            "up_blocks.1.resnets.1.conv1",    # 960→640
+            "up_blocks.1.resnets.1.conv2",    # 640→640
         ]
+        
         all_convs = get_all_conv2d_names(self.unet)
         return [name for name in all_convs if not any(x in name for x in ignore)]
 
@@ -554,27 +581,8 @@ def main():
     
     # Initialize model
     model = StableDiffusionTrainingModule(pretrained=True)
-    model.apply_quantization(quant_type="t")
+    model.apply_quantization(quant_type="tsvd")
     print(model)
-    
-    
-    # Setup logger (optional)
-    logger = WandbLogger(project="stable-diffusion-training")
-    
-    # Initialize trainer
-    trainer = pl.Trainer(
-        max_epochs=40,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=1,
-        precision="bf16-mixed",  # Use mixed precision for memory efficiency
-        logger=logger,
-        gradient_clip_val=1.0,
-        limit_val_batches=5, 
-        limit_train_batches=5,
-    )
-    datamodule = ImageNetDataModule(batch_size=32, num_workers=12, image_size=256)
-    # Start training
-    trainer.fit(model, datamodule)
     
 
 

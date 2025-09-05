@@ -325,6 +325,8 @@ def compute_total_reg_loss(module):
     return total_loss
 
 
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
     import numpy as np

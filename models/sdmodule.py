@@ -312,14 +312,22 @@ class StableDiffusionModule(pl.LightningModule):
         return quant_type
 
     def _get_quant_conv2d_layer_names(self) -> List[str]:
+        """Only quantize small layers, avoid big ones."""
         ignore = [
+            # Your existing ignores
             "conv_in", "conv_out", "conv_norm_out",
-            "time_proj", "time_embedding", "time_emb_proj",
+            "time_proj", "time_embedding", "time_emb_proj", 
             "Downsample2D.conv", "Upsample2D.conv",
-            "conv_shortcut",
-            ".norm", "GroupNorm", "LayerNorm",
-            "attn2.to_k", "attn2.to_v",
+            "conv_shortcut", ".norm", "GroupNorm", "LayerNorm",
+            "attn2.to_k", "attn2.to_v", "proj_in", "proj_out",
+            
+            # Avoid all deep blocks (pattern-based)
+            "down_blocks.2",  # All 1280-channel blocks
+            "up_blocks.0",    # All 1280-channel blocks  
+            "down_blocks.1",  # All 640-channel blocks
+            "up_blocks.1",    # All 640-channel blocks
         ]
+        
         all_convs = get_all_conv2d_names(self.unet)
         return [name for name in all_convs if not any(x in name for x in ignore)]
 
