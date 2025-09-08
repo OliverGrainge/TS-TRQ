@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J sd_tsvd
 #SBATCH -t 48:00:00
-#SBATCH -p a100
+#SBATCH -p quad_h200
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                # 1 task for 1 GPU
 #SBATCH --gpus=1                  # 1 GPU total

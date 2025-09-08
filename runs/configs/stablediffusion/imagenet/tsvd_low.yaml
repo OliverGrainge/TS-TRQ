@@ -19,18 +19,18 @@ train_config:
     
 
 model_checkpoint_config: 
-    dirpath: "checkpoints/resnet/stable_diffusion/tsvd"
-    filename: tsvd
+    dirpath: "checkpoints/resnet/stable_diffusion/tsvd_low"
+    filename: tsvd_low
 
 logger_config:
   type: "wandb"
   project: "stable-diffusion"
-  name: "tsvd_qat"
+  name: "tsvd_qat_lowreg"
   save_dir: "logs/"
   log_model: false
 
 quantization_config:
   quant_type: "tsvd"
-  reg_scale: 4.0
+  reg_scale: 0.3
   reg_type: "l2"
   rank: 8

@@ -1,0 +1,37 @@
+module_config: 
+    module_type: "resnet" 
+    model_name: "resnet18"
+    num_classes: 1000
+    learning_rate: 0.001 
+    image_size: 224
+
+datamodule_config: 
+    dataset: "imagenet"
+    batch_size: 256
+    num_workers: 8 
+    image_size: 224
+
+train_config: 
+    accelerator: "auto" 
+    strategy: "auto"
+    precision: "bf16-mixed"
+    max_epochs: 50
+    enable_progress_bar: true
+
+
+model_checkpoint_config: 
+    dirpath: "checkpoints/resnet/resnet18_imagenet/tsvdlinear"
+    filename: tsvdlinear
+
+logger_config:
+  type: "wandb"
+  project: "resnet18_imagenet"
+  name: "resnet18_tsvdlinear"
+  save_dir: "logs/"
+  log_model: false
+ 
+quantization_config:
+  quant_type: "tsvdconv2d"
+  reg_scale: 2.0
+  reg_type: "l2"
+  rank: 16

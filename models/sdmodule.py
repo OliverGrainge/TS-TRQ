@@ -220,7 +220,7 @@ class StableDiffusionModule(pl.LightningModule):
         reg_loss = self.reg_loss()
         loss = mse_loss + reg_loss
 
-        self.log("mse_loss", loss, prog_bar=True)  # keep original logging keys/values
+        self.log("mse_loss", mse_loss, prog_bar=True)  # keep original logging keys/values
         self.log("reg_loss", reg_loss)
         self.log("train_loss", loss)
 
