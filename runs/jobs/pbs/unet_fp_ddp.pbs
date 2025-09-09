@@ -4,7 +4,7 @@
 #PBS -l walltime=48:00:00
 # Request 2 nodes; each node: 2 MPI ranks (one per GPU), 2 GPUs, 24 CPUs total, 64 GB RAM
 # Adjust mem to whatever matches the node type on your cluster.
-#PBS -l select=2:ncpus=24:ngpus=2:mpiprocs=2:mem=96gb
+#PBS -l select=1:ncpus=24:ngpus=2:mpiprocs=2:mem=96gb
 # Optional: prevent sharing nodes and spread across nodes
 #PBS -l place=scatter:excl
 # Logs
