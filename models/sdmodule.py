@@ -15,7 +15,8 @@ from diffusers import (
     LMSDiscreteScheduler,
 )
 from data import ImageNetDataModule
-from quant import quantize_model, get_all_conv2d_names, get_all_linear_names  
+from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
+from .base import QBaseModule  # Import the base class
 
 
 
@@ -84,13 +85,15 @@ def load_stable_diffusion(pretrained: bool = True) -> Dict[str, Any]:
 # Lightning training module
 # ---------------------------------
 
-class StableDiffusionModule(pl.LightningModule):
+class StableDiffusionModule(QBaseModule):
     def __init__(
         self,
         learning_rate: float = 2e-4,
         gradient_checkpointing: bool = True,
         train_text_encoder: bool = False,
         pretrained: bool = True,
+        *args,
+        **kwargs
     ):
         """
         Minimal Stable Diffusion training wrapper around UNet + text encoder.
@@ -101,12 +104,13 @@ class StableDiffusionModule(pl.LightningModule):
             train_text_encoder: Whether to unfreeze text encoder for training.
             pretrained: Load UNet weights vs. config-init.
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.save_hyperparameters()
 
         self.learning_rate = learning_rate
         self.train_text_encoder = train_text_encoder
-        self.is_quantized = False  # state flag
+        self.gradient_checkpointing = gradient_checkpointing
+        self.pretrained = pretrained
 
         # Load core components
         model_dict = load_stable_diffusion(pretrained=pretrained)
@@ -114,6 +118,9 @@ class StableDiffusionModule(pl.LightningModule):
         self.text_encoder = model_dict["text_encoder"]
         self.tokenizer = model_dict["tokenizer"]
         self.unet = model_dict["unet"]
+
+        # Set the model for the base class
+        self.model = self.unet
 
         # Schedulers
         self.train_noise_scheduler = model_dict["train_noise_scheduler"]
@@ -134,6 +141,38 @@ class StableDiffusionModule(pl.LightningModule):
         self.vae.eval()
         if not self.train_text_encoder:
             self.text_encoder.eval()
+
+    def setup_model(self) -> None:
+        """
+        Initialize the main model components (UNet, text encoder, etc.).
+        Implementation of abstract method from QBaseModule.
+        """
+        if self.model is None:
+            model_dict = load_stable_diffusion(pretrained=self.pretrained)
+            self.vae = model_dict["vae"]
+            self.text_encoder = model_dict["text_encoder"]
+            self.tokenizer = model_dict["tokenizer"]
+            self.unet = model_dict["unet"]
+            self.model = self.unet
+            
+            self.train_noise_scheduler = model_dict["train_noise_scheduler"]
+            self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
+            
+            # Freeze VAE and (optionally) text encoder
+            self.vae.requires_grad_(False)
+            if not self.train_text_encoder:
+                self.text_encoder.requires_grad_(False)
+
+            # Gradient checkpointing
+            if self.gradient_checkpointing:
+                self.unet.enable_gradient_checkpointing()
+                if self.train_text_encoder:
+                    self.text_encoder.gradient_checkpointing_enable()
+
+            # Eval mode for frozen parts
+            self.vae.eval()
+            if not self.train_text_encoder:
+                self.text_encoder.eval()
 
     # ------------- Utilities -------------
 
@@ -237,6 +276,10 @@ class StableDiffusionModule(pl.LightningModule):
         model_pred, target = self.forward(pixel_values, captions)
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         self.log("val_loss", loss)
+        
+        # Call parent validation_step for quantization statistics logging
+        super().validation_step(batch, batch_idx)
+        
         return loss
 
     def on_validation_epoch_end(self) -> None:
@@ -260,59 +303,13 @@ class StableDiffusionModule(pl.LightningModule):
             eps=1e-8,
         )
 
-    # ------------- Quantization -------------
-
-    def apply_quantization(self, quant_type: str, **quant_kwargs: Any) -> None:
-        """
-        Apply quantization to UNet layers (and update internal state).
-        Keeps original mapping and ignores if already quantized.
-        """
-        if not quant_type:
-            print("No quantization type specified or quantization disabled. Skipping quantization.")
-            return
-
-        if self.is_quantized:
-            print(f"Model is already quantized with {self.quant_type}. Skipping.")
-            return
-
-        print(f"Applying {quant_type} quantization to model with kwargs: {quant_kwargs}")
-
-        # Conv2d
-        conv_layers = self._get_quant_conv2d_layer_names()
-        self.unet = quantize_model(
-            self.unet,
-            layer_names=conv_layers,
-            quant_type=self._update_quant_type(quant_type, "conv2d"),
-            **quant_kwargs,
-        )
-
-        # Linear
-        linear_layers = self._get_quant_linear_layer_names()
-        self.unet = quantize_model(
-            self.unet,
-            layer_names=linear_layers,
-            quant_type=self._update_quant_type(quant_type, "linear"),
-            **quant_kwargs,
-        )
-
-        self.is_quantized = True
-        self.quant_type = quant_type
-        self.quant_kwargs = quant_kwargs
-
-    @staticmethod
-    def _update_quant_type(quant_type: str, layer_type: str) -> str:
-        if "tsvd" in quant_type and layer_type == "conv2d":
-            return "tsvdconv2d"
-        if "tsvd" in quant_type and layer_type == "linear":
-            return "tsvdlinear"
-        if "t" in quant_type and layer_type == "conv2d":
-            return "tconv2d"
-        if "t" in quant_type and layer_type == "linear":
-            return "tlinear"
-        return quant_type
+    # ------------- Layer Selection Overrides -------------
 
     def _get_quant_conv2d_layer_names(self) -> List[str]:
         """Only quantize small layers, avoid big ones."""
+        if self.model is None:
+            return []
+        
         ignore = [
             # Your existing ignores
             "conv_in", "conv_out", "conv_norm_out",
@@ -332,6 +329,9 @@ class StableDiffusionModule(pl.LightningModule):
         return [name for name in all_convs if not any(x in name for x in ignore)]
 
     def _get_quant_linear_layer_names(self) -> List[str]:
+        if self.model is None:
+            return []
+        
         ignore = [
             "conv_in", "conv_out", "conv_norm_out",
             "time_proj", "time_embedding", "time_emb_proj",
@@ -343,96 +343,36 @@ class StableDiffusionModule(pl.LightningModule):
         all_linear = get_all_linear_names(self.unet)
         return [name for name in all_linear if not any(x in name for x in ignore)]
 
-    # ------------- Regularization -------------
-
-    def reg_loss(self, reduction: str = "mean") -> torch.Tensor:
+    def _get_ignore_conv2d_patterns(self) -> List[str]:
         """
-        Aggregate per-layer regularization losses (if any) emitted by quantized modules.
+        Get patterns for Conv2d layer names to ignore during quantization.
+        Override of base class method.
         """
-        if not self.is_quantized:
-            return torch.tensor(0.0, device=self.device)
+        return [
+            "conv_in", "conv_out", "conv_norm_out",
+            "time_proj", "time_embedding", "time_emb_proj", 
+            "Downsample2D.conv", "Upsample2D.conv",
+            "conv_shortcut", ".norm", "GroupNorm", "LayerNorm",
+            "attn2.to_k", "attn2.to_v", "proj_in", "proj_out",
+            "down_blocks.2",  # All 1280-channel blocks
+            "up_blocks.0",    # All 1280-channel blocks  
+            "down_blocks.1",  # All 640-channel blocks
+            "up_blocks.1",    # All 640-channel blocks
+        ]
 
-        losses: List[torch.Tensor] = []
-        for m in self.unet.modules():
-            fn = getattr(m, "layer_reg_loss", None)
-            if callable(fn):
-                losses.append(fn())
-
-        if not losses:
-            return torch.tensor(0.0, device=self.device)
-
-        losses_t = torch.stack([torch.as_tensor(l, device=self.device) for l in losses])
-        return losses_t.mean() if reduction == "mean" else losses_t.sum()
-
-    # ------------- Diagnostics -------------
-
-    def ternary_vs_lr_ratio(self) -> Dict[str, Union[float, List[float]]]:
+    def _get_ignore_linear_patterns(self) -> List[str]:
         """
-        Compute ternary vs. low-rank contribution ratios across TSVD layers.
-        Returns aggregate stats and raw values for histogram logging.
+        Get patterns for Linear layer names to ignore during quantization.
+        Override of base class method.
         """
-        if not self.is_quantized or "tsvd" not in getattr(self, "quant_type", ""):
-            return {"mean": 1.0, "median": 1.0, "min": 1.0, "max": 1.0, "values": [1.0]}
-
-        ratios: List[float] = []
-        for module in self.unet.modules():
-            if self._is_tsvd_layer(module):
-                ratio = self._compute_layer_ratio(module)
-                if ratio is not None:
-                    ratios.append(float(ratio))
-
-        if not ratios:
-            return {"mean": 1.0, "median": 1.0, "min": 1.0, "max": 1.0, "values": [1.0]}
-
-        t = torch.tensor(ratios, device=self.device)
-        return {
-            "mean": float(t.mean().item()),
-            "median": float(t.median().item()),
-            "min": float(t.min().item()),
-            "max": float(t.max().item()),
-            "values": ratios,
-        }
-
-    @staticmethod
-    def _is_tsvd_layer(module: torch.nn.Module) -> bool:
-        """Heuristic: TSVD layer if it exposes expected attributes."""
-        required = ["alpha", "L", "R", "lr_scalars", "weight"]
-        return all(hasattr(module, attr) for attr in required)
-
-    def _compute_layer_ratio(self, module: torch.nn.Module) -> Optional[torch.Tensor]:
-        """
-        Compute |alpha * ternary(W)| / |lr_scalars * (L @ R)| for a TSVD layer.
-        """
-        with torch.no_grad():
-            if hasattr(module, "ternary_quantize"):
-                q_w, alpha, _, _ = module.ternary_quantize(module.weight, module.thresh_ratio)
-            else:
-                q_w = torch.sign(module.weight)
-                alpha = module.alpha
-
-            ternary_part = (alpha * q_w).abs().mean()
-
-            L = module.L.to(device=self.device, dtype=module.weight.dtype)
-            R = module.R.to(device=self.device, dtype=module.weight.dtype)
-            lr_scalars = module.lr_scalars.to(device=self.device, dtype=module.weight.dtype)
-
-            if L.numel() > 0 and R.numel() > 0:
-                lowrank_part = (lr_scalars * (L @ R)).abs().mean()
-            else:
-                lowrank_part = torch.tensor(1e-8, device=self.device)
-
-            eps = 1e-8
-            return ternary_part / (lowrank_part + eps)
-
-    def log_stats(self) -> Dict[str, Union[float, List[float]]]:
-        """
-        Log ternary vs. low-rank ratios; returns the stats for external use/tests.
-        """
-        ratios = self.ternary_vs_lr_ratio()
-        for k, v in ratios.items():
-            if "value" not in k:
-                self.log(f"ternary_vs_LR_ratio/{k}", v)
-        return ratios
+        return [
+            "conv_in", "conv_out", "conv_norm_out",
+            "time_proj", "time_embedding", "time_emb_proj",
+            "Downsample2D.conv", "Upsample2D.conv",
+            "conv_shortcut",
+            ".norm", "GroupNorm", "LayerNorm",
+            "attn2.to_k", "attn2.to_v",
+        ]
 
     # ------------- Inference (Generation) -------------
 

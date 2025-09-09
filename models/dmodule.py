@@ -1,3 +1,4 @@
+
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -15,7 +16,8 @@ from diffusers import (
     EulerAncestralDiscreteScheduler,
 )
 from data import ImageNetDataModule
-from quant import quantize_model, get_all_conv2d_names, get_all_linear_names  
+from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
+from .base import QBaseModule  # Import the base class
 
 
 
@@ -36,7 +38,6 @@ def load_diffusion_model() -> Dict[str, Any]:
     """
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE")
 
-
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir=cache_dir)
 
     unet = UNet2DModel(
@@ -54,7 +55,6 @@ def load_diffusion_model() -> Dict[str, Any]:
     train_noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
     inference_noise_scheduler = EulerAncestralDiscreteScheduler.from_config(train_noise_scheduler.config)
 
-
     return {
         "vae": vae,
         "unet": unet,
@@ -66,11 +66,12 @@ def load_diffusion_model() -> Dict[str, Any]:
 # ---------------------------------
 # Lightning training module
 # ---------------------------------
-
-class DiffusionModule(pl.LightningModule):
+class DiffusionModule(QBaseModule):
     def __init__(
         self,
         learning_rate: float = 2e-4,
+        *args,
+        **kwargs
     ):
         """
         Minimal Stable Diffusion training wrapper around UNet + text encoder.
@@ -78,16 +79,18 @@ class DiffusionModule(pl.LightningModule):
         Args:
             learning_rate: Optimizer LR.
         """
-        super().__init__()
+        super().__init__(*args, **kwargs)
         self.save_hyperparameters()
 
         self.learning_rate = learning_rate
-        self.is_quantized = False  # state flag
 
         # Load core components
         model_dict = load_diffusion_model()
         self.vae = model_dict["vae"]
         self.unet = model_dict["unet"]
+
+        # Set the model for the base class
+        self.model = self.unet
 
         # Schedulers
         self.train_noise_scheduler = model_dict["train_noise_scheduler"]
@@ -95,6 +98,23 @@ class DiffusionModule(pl.LightningModule):
 
         # Freeze VAE
         self.vae.requires_grad_(False)
+
+    def setup_model(self) -> None:
+        """
+        Initialize the main model components (unet, etc.).
+        Implementation of abstract method from QBaseModule.
+        """
+        if self.model is None:
+            model_dict = load_diffusion_model()
+            self.vae = model_dict["vae"]
+            self.unet = model_dict["unet"]
+            self.model = self.unet
+            
+            self.train_noise_scheduler = model_dict["train_noise_scheduler"]
+            self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
+            
+            # Freeze VAE
+            self.vae.requires_grad_(False)
 
     # ------------- Forward / Steps -------------
 
@@ -156,6 +176,10 @@ class DiffusionModule(pl.LightningModule):
         model_pred, target = self.forward(pixel_values)
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         self.log("val_loss", loss)
+        
+        # Call parent validation_step for quantization statistics logging
+        super().validation_step(batch, batch_idx)
+        
         return loss
 
     def on_validation_epoch_end(self) -> None:
@@ -178,56 +202,7 @@ class DiffusionModule(pl.LightningModule):
             eps=1e-8,
         )
 
-    # ------------- Quantization -------------
-
-    def apply_quantization(self, quant_type: str, **quant_kwargs: Any) -> None:
-        """
-        Apply quantization to UNet layers (and update internal state).
-        Keeps original mapping and ignores if already quantized.
-        """
-        if not quant_type:
-            print("No quantization type specified or quantization disabled. Skipping quantization.")
-            return
-
-        if self.is_quantized:
-            print(f"Model is already quantized with {self.quant_type}. Skipping.")
-            return
-
-        print(f"Applying {quant_type} quantization to model with kwargs: {quant_kwargs}")
-
-        # Conv2d
-        conv_layers = self._get_quant_conv2d_layer_names()
-        self.unet = quantize_model(
-            self.unet,
-            layer_names=conv_layers,
-            quant_type=self._update_quant_type(quant_type, "conv2d"),
-            **quant_kwargs,
-        )
-
-        # Linear
-        linear_layers = self._get_quant_linear_layer_names()
-        self.unet = quantize_model(
-            self.unet,
-            layer_names=linear_layers,
-            quant_type=self._update_quant_type(quant_type, "linear"),
-            **quant_kwargs,
-        )
-
-        self.is_quantized = True
-        self.quant_type = quant_type
-        self.quant_kwargs = quant_kwargs
-
-    @staticmethod
-    def _update_quant_type(quant_type: str, layer_type: str) -> str:
-        if "tsvd" in quant_type and layer_type == "conv2d":
-            return "tsvdconv2d"
-        if "tsvd" in quant_type and layer_type == "linear":
-            return "tsvdlinear"
-        if "t" in quant_type and layer_type == "conv2d":
-            return "tconv2d"
-        if "t" in quant_type and layer_type == "linear":
-            return "tlinear"
-        return quant_type
+    # ------------- Layer Selection Overrides -------------
 
     def _get_quant_conv2d_layer_names(self) -> List[str]:
         """Only quantize small layers, avoid big ones."""
@@ -239,97 +214,6 @@ class DiffusionModule(pl.LightningModule):
         ignore = [""]
         all_linear = get_all_linear_names(self.unet)
         return [name for name in all_linear if not any(x in name for x in ignore)]
-
-    # ------------- Regularization -------------
-
-    def reg_loss(self, reduction: str = "mean") -> torch.Tensor:
-        """
-        Aggregate per-layer regularization losses (if any) emitted by quantized modules.
-        """
-        if not self.is_quantized:
-            return torch.tensor(0.0, device=self.device)
-
-        losses: List[torch.Tensor] = []
-        for m in self.unet.modules():
-            fn = getattr(m, "layer_reg_loss", None)
-            if callable(fn):
-                losses.append(fn())
-
-        if not losses:
-            return torch.tensor(0.0, device=self.device)
-
-        losses_t = torch.stack([torch.as_tensor(l, device=self.device) for l in losses])
-        return losses_t.mean() if reduction == "mean" else losses_t.sum()
-
-    # ------------- Diagnostics -------------
-
-    def ternary_vs_lr_ratio(self) -> Dict[str, Union[float, List[float]]]:
-        """
-        Compute ternary vs. low-rank contribution ratios across TSVD layers.
-        Returns aggregate stats and raw values for histogram logging.
-        """
-        if not self.is_quantized or "tsvd" not in getattr(self, "quant_type", ""):
-            return {"mean": 1.0, "median": 1.0, "min": 1.0, "max": 1.0, "values": [1.0]}
-
-        ratios: List[float] = []
-        for module in self.unet.modules():
-            if self._is_tsvd_layer(module):
-                ratio = self._compute_layer_ratio(module)
-                if ratio is not None:
-                    ratios.append(float(ratio))
-
-        if not ratios:
-            return {"mean": 1.0, "median": 1.0, "min": 1.0, "max": 1.0, "values": [1.0]}
-
-        t = torch.tensor(ratios, device=self.device)
-        return {
-            "mean": float(t.mean().item()),
-            "median": float(t.median().item()),
-            "min": float(t.min().item()),
-            "max": float(t.max().item()),
-            "values": ratios,
-        }
-
-    @staticmethod
-    def _is_tsvd_layer(module: torch.nn.Module) -> bool:
-        """Heuristic: TSVD layer if it exposes expected attributes."""
-        required = ["alpha", "L", "R", "lr_scalars", "weight"]
-        return all(hasattr(module, attr) for attr in required)
-
-    def _compute_layer_ratio(self, module: torch.nn.Module) -> Optional[torch.Tensor]:
-        """
-        Compute |alpha * ternary(W)| / |lr_scalars * (L @ R)| for a TSVD layer.
-        """
-        with torch.no_grad():
-            if hasattr(module, "ternary_quantize"):
-                q_w, alpha, _, _ = module.ternary_quantize(module.weight, module.thresh_ratio)
-            else:
-                q_w = torch.sign(module.weight)
-                alpha = module.alpha
-
-            ternary_part = (alpha * q_w).abs().mean()
-
-            L = module.L.to(device=self.device, dtype=module.weight.dtype)
-            R = module.R.to(device=self.device, dtype=module.weight.dtype)
-            lr_scalars = module.lr_scalars.to(device=self.device, dtype=module.weight.dtype)
-
-            if L.numel() > 0 and R.numel() > 0:
-                lowrank_part = (lr_scalars * (L @ R)).abs().mean()
-            else:
-                lowrank_part = torch.tensor(1e-8, device=self.device)
-
-            eps = 1e-8
-            return ternary_part / (lowrank_part + eps)
-
-    def log_stats(self) -> Dict[str, Union[float, List[float]]]:
-        """
-        Log ternary vs. low-rank ratios; returns the stats for external use/tests.
-        """
-        ratios = self.ternary_vs_lr_ratio()
-        for k, v in ratios.items():
-            if "value" not in k:
-                self.log(f"ternary_vs_LR_ratio/{k}", v)
-        return ratios
 
     # ------------- Inference (Generation) -------------
 

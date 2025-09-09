@@ -204,23 +204,7 @@ def get_module(module_config):
     """Load and return the specified model module"""
     module_type = module_config.pop("module_type", "vit")
 
-    if module_type == "dit":
-        from models import DiTModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            return DiTModule.load_from_checkpoint(checkpoint, **module_config)
-        else:
-            return DiTModule(**module_config)
-    elif module_type == "vit":
-        from models import ViTModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            return ViTModule.load_from_checkpoint(checkpoint, **module_config)
-        else:
-            return ViTModule(**module_config)
-    elif module_type == "resnet":
+    if module_type == "resnet":
         from models import ResNetModule
 
         checkpoint = module_config.pop("checkpoint", None)
