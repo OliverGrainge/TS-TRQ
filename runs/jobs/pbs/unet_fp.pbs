@@ -1,0 +1,14 @@
+#!/bin/bash
+#PBS -N unet_fp
+#PBS -l walltime=12:00:00
+#PBS -l select=1:ncpus=12:ngpus=1
+#PBS -q gpu
+#PBS -o logs/unet_fp.out
+#PBS -e logs/unet_fp.err
+#PBS -j oe
+
+# Change to the directory where the job was submitted
+cd $PBS_O_WORKDIR
+
+# Run the training script
+python train.py runs/configs/stablediffusion/imagenet/linear_pretrained.yaml

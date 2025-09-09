@@ -236,6 +236,14 @@ def get_module(module_config):
             return StableDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return StableDiffusionModule(**module_config)
+    elif module_type == "diffusion":
+        from models import DiffusionModule
+
+        checkpoint = module_config.pop("checkpoint", None)
+        if checkpoint is not None:
+            return DiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+        else:
+            return DiffusionModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
 
