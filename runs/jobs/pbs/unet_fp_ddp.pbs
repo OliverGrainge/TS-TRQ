@@ -1,0 +1,15 @@
+#!/bin/bash
+#PBS -N unet_ddp
+#PBS -l walltime=48:00:00
+#PBS -q a100
+#PBS -l select=2:ncpus=24:ngpus=2:mpiprocs=2
+#PBS -o logs/unet_fp_ddp.out
+#PBS -e logs/unet_fp_ddp.err
+
+cd $PBS_O_WORKDIR
+
+# Load environment if needed
+# module load cuda/11.8
+
+# Launch with mpirun or equivalent
+mpirun -np 4 python train.py runs/configs/diffusion/fp_ddp.yaml
