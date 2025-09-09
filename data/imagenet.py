@@ -56,8 +56,8 @@ class ImageNetDataModule(pl.LightningDataModule):
             self.transform = transforms.Compose(default_transform)
 
     def setup(self, stage=None):
-        self.train_dataset = load_dataset("ILSVRC/imagenet-1k", split="train")
-        self.val_dataset = load_dataset("ILSVRC/imagenet-1k", split="validation")
+        self.train_dataset = load_dataset("timm/imagenet-1k-wds", split="train")
+        self.val_dataset = load_dataset("timm/imagenet-1k-wds", split="validation")
 
         # Get class names from the dataset features
         label_feature = self.train_dataset.features["label"]

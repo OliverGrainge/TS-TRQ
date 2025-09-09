@@ -4,7 +4,7 @@ module_config:
 
 datamodule_config: 
     dataset: "imagenet"
-    batch_size: 128
+    batch_size: 512
     num_workers: 8 
     image_size: 128
 
