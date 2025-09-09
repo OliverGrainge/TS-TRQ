@@ -34,7 +34,7 @@ def download_imagenet():
         for split in ["train", "validation"]:
             print(f"Downloading ImageNet-1K {split} split...")
             ds = load_dataset(
-                "imagenet-1k",  # Official repository name
+                "timm/imagenet-1k-wds",  # Official repository name
                 split=split,
                 cache_dir=cache_dir,
                 download_config=DownloadConfig(delete_extracted=True),
