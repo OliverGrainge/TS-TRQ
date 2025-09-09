@@ -34,11 +34,12 @@ def download_imagenet():
         for split in ["train", "validation"]:
             print(f"Downloading ImageNet-1K {split} split...")
             ds = load_dataset(
-                "ILSVRC/imagenet-1k",
+                "imagenet-1k",  # Official repository name
                 split=split,
                 cache_dir=cache_dir,
                 download_config=DownloadConfig(delete_extracted=True),
-                trust_remote_code=True,
+                token=hf_token,  # Use token parameter instead of trust_remote_code
+                streaming=False,  # Set to True if you want streaming mode
             )
             print(
                 f"Downloaded split '{split}' to: {ds.cache_files[0]['filename'] if ds.cache_files else 'unknown location'}"
