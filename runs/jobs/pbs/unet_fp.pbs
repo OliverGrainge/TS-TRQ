@@ -1,14 +1,15 @@
 #!/bin/bash
-#PBS -N unet_fp
-#PBS -l walltime=12:00:00
-#PBS -l select=1:ncpus=12:ngpus=1
-#PBS -q gpu
+#PBS -N unet
+#PBS -q a100
+#PBS -l walltime=48:00:00
+# Request 1 node, 1 GPU, 12 CPUs, 128 GB RAM
+#PBS -l select=1:ncpus=12:ngpus=1:mpiprocs=1:mem=128gb
+# Optional: prevent sharing nodes and spread across nodes
+#PBS -l place=scatter:excl
+# Logs
 #PBS -o logs/unet_fp.out
 #PBS -e logs/unet_fp.err
-#PBS -j oe
 
-# Change to the directory where the job was submitted
-cd $PBS_O_WORKDIR
+cd "$PBS_O_WORKDIR"
 
-# Run the training script
-python train.py runs/configs/stablediffusion/imagenet/linear_pretrained.yaml
+python train.py runs/configs/diffusion/fp.yaml
