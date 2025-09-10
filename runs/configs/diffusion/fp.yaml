@@ -1,10 +1,11 @@
 module_config: 
     module_type: "diffusion" 
     learning_rate: 0.0002
+    batch_size: 256
 
 datamodule_config: 
     dataset: "imagenet"
-    batch_size: 128
+    batch_size: 256
     num_workers: 8 
     image_size: 128
 
@@ -14,7 +15,6 @@ train_config:
     precision: "bf16-mixed"
     max_epochs: 100
     enable_progress_bar: True
-    val_check_interval: 0.5
 
 model_checkpoint_config: 
     dirpath: "checkpoints/resnet/diffusion/fp"

@@ -41,18 +41,31 @@ def load_diffusion_model() -> Dict[str, Any]:
     vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir=cache_dir)
 
     unet = UNet2DModel(
-        sample_size=16,  # 128/8 = 16 for VAE latents
-        in_channels=4, 
+        class_embed_type="timestep",
+        num_class_embeds=1000,
+        
+        sample_size=128,  # Match your training resolution
+        in_channels=4,
         out_channels=4,
-        block_out_channels=(128, 256, 512),  # More capacity
-        down_block_types=("DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"),
-        up_block_types=("AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"),
-        layers_per_block=2,  # More layers per block
-        attention_head_dim=8,
-        num_class_embeds=None,
+        
+        # Larger architecture for better quality
+        down_block_types=("DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"),
+        up_block_types=("AttnUpBlock2D", "AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"),
+        block_out_channels=(128, 256, 512, 1024), 
+        
+        layers_per_block=2,
+        attention_head_dim=16,  # Increased from 8
+        norm_num_groups=32,
     )
 
-    train_noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
+
+    train_noise_scheduler = DDPMScheduler(
+        num_train_timesteps=1000,
+        beta_schedule="scaled_linear",  # Better than linear
+        beta_start=0.00085,
+        beta_end=0.012,
+        clip_sample=False,
+    )
     inference_noise_scheduler = EulerAncestralDiscreteScheduler.from_config(train_noise_scheduler.config)
 
     return {
@@ -69,6 +82,7 @@ def load_diffusion_model() -> Dict[str, Any]:
 class DiffusionModule(QBaseModule):
     def __init__(
         self,
+        batch_size: int,
         learning_rate: float = 2e-4,
         *args,
         **kwargs
@@ -83,6 +97,7 @@ class DiffusionModule(QBaseModule):
         self.save_hyperparameters()
 
         self.learning_rate = learning_rate
+        self.batch_size = batch_size
 
         # Load core components
         model_dict = load_diffusion_model()
@@ -119,7 +134,7 @@ class DiffusionModule(QBaseModule):
     # ------------- Forward / Steps -------------
 
     def forward(
-        self, pixel_values: torch.Tensor
+        self, pixel_values: torch.Tensor, labels: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         One training forward pass:
@@ -147,15 +162,16 @@ class DiffusionModule(QBaseModule):
 
         # UNet predicts noise residual
         model_pred = self.unet(
-            noisy_latents, timesteps
+            noisy_latents, timesteps, class_labels=labels
         ).sample
 
         return model_pred, noise
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
         pixel_values = batch["pixel_values"]
+        labels = batch["labels"]
 
-        model_pred, target = self.forward(pixel_values)
+        model_pred, target = self.forward(pixel_values, labels)
         mse_loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         reg_loss = self.reg_loss()
         loss = mse_loss + reg_loss
@@ -171,9 +187,10 @@ class DiffusionModule(QBaseModule):
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
         pixel_values = batch["pixel_values"]
+        labels = batch["labels"]
         # Support both 'caption' and 'captions' without changing existing behavior.
 
-        model_pred, target = self.forward(pixel_values)
+        model_pred, target = self.forward(pixel_values, labels)
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         self.log("val_loss", loss)
         
@@ -227,6 +244,7 @@ class DiffusionModule(QBaseModule):
         return_pil: bool = True,
         batch_size: int = 1,
         pbar: bool = False,
+        class_type: int = 1,
     ) -> Union[List["Image.Image"], torch.Tensor]:
         """
         Unconditional image generation using the current UNet model.
@@ -252,12 +270,14 @@ class DiffusionModule(QBaseModule):
         timesteps = scheduler.timesteps
         latents = latents * scheduler.init_noise_sigma
 
+        labels = torch.tensor([class_type] * batch_size, device=device)
+
         # Denoising loop - unconditional generation
         for _, t in tqdm(enumerate(timesteps), total=len(timesteps), disable=not pbar):
             latent_in = scheduler.scale_model_input(latents.to(device), timestep=t)
             
             # Unconditional UNet forward pass (no encoder_hidden_states)
-            noise_pred = self.unet(latent_in, t).sample
+            noise_pred = self.unet(latent_in, t, class_labels=labels).sample
             
             latents = scheduler.step(noise_pred, t, latents).prev_sample
 

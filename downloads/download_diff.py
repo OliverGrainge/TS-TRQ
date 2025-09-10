@@ -7,6 +7,9 @@ Usage:
 
 import os
 from dotenv import load_dotenv
+
+load_dotenv()
+
 from diffusers import AutoencoderKL
 
 
@@ -14,12 +17,12 @@ def download_unet_vae():
     """
     Download and cache Stable Diffusion VAE component.
     """
-    load_dotenv()
     
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE", None)
     
     try:
         # Download VAE
+        print(f"Downloading Stable Diffusion VAE to {cache_dir}")
         print("Downloading Stable Diffusion VAE...")
         vae = AutoencoderKL.from_pretrained(
             "stabilityai/sd-vae-ft-ema", 
