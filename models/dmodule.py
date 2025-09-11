@@ -180,7 +180,7 @@ class DiffusionModule(QBaseModule):
         self.log("reg_loss", reg_loss)
         self.log("train_loss", loss)
 
-        if self.global_step % 100 == 0:
+        if self.global_step % 500 == 0:
             self.log_stats()
 
         return loss
@@ -219,18 +219,57 @@ class DiffusionModule(QBaseModule):
             eps=1e-8,
         )
 
-    # ------------- Layer Selection Overrides -------------
 
-    def _get_quant_conv2d_layer_names(self) -> List[str]:
-        """Only quantize small layers, avoid big ones."""
-        ignore = [""]
-        all_convs = get_all_conv2d_names(self.unet)
-        return [name for name in all_convs if not any(x in name for x in ignore)]
+    def _get_ignore_conv2d_patterns(self) -> List[str]:
+        """
+        Get patterns for Conv2d layer names to ignore during quantization.
+        These layers are critical for model stability and should remain full precision.
+        """
+        return [
+            # Input/Output layers - critical for maintaining data flow
+            "conv_in",           # Initial input convolution
+            "conv_out",          # Final output convolution
 
-    def _get_quant_linear_layer_names(self) -> List[str]:
-        ignore = [""]
-        all_linear = get_all_linear_names(self.unet)
-        return [name for name in all_linear if not any(x in name for x in ignore)]
+            # Deeper layers in the network - more sensitive to quantization
+            #"down_blocks.2",     # Third down block (512 channels)
+            "down_blocks.3",     # Fourth down block (1024 channels) 
+            "up_blocks.0",       # First up block (1024 channels)
+            #"up_blocks.1",       # Second up block (512 channels)
+            "mid_block",         # Middle block - bottleneck, most critical
+            
+            
+            # Shortcut connections - maintain residual flow
+            "conv_shortcut",     # Skip connections in ResNet blocks
+            
+            # Small kernel convolutions that are already efficient
+            # Note: 1x1 convs are often used for dimension matching and are lightweight
+        ]
+
+    def _get_ignore_linear_patterns(self) -> List[str]:
+        """
+        Get patterns for Linear layer names to ignore during quantization.
+        These layers handle embeddings and attention which need higher precision.
+        """
+        return [
+            # Time embedding layers - critical for diffusion timestep conditioning
+            "time_embedding",    # Timestep embeddings
+            "time_emb_proj",
+            "linear_1",          # First linear layer in time embeddings
+            "linear_2",          # Second linear layer in time embeddings
+            
+            # Class embedding layers - for conditional generation
+            "class_embedding",   # Class conditioning embeddings
+            
+            # Time projection layers
+            "time_emb_proj",     # Time embedding projections into ResNet blocks
+            
+            # First and last layers of attention (most sensitive)
+            # You might want to be more selective here based on performance
+            # "to_q",            # Query projection - consider keeping these
+            # "to_k",            # Key projection - consider keeping these  
+            # "to_v",            # Value projection - consider keeping these
+            # "to_out.0",        # Output projection - consider keeping these
+        ]
 
     # ------------- Inference (Generation) -------------
 

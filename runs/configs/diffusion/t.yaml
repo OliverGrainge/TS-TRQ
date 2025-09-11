@@ -1,5 +1,6 @@
 module_config: 
     module_type: "diffusion" 
+    checkpoint: "checkpoints/diffusion/fp/unet_fp.ckpt"
     learning_rate: 0.0002
     batch_size: 256
 
@@ -17,15 +18,15 @@ train_config:
     enable_progress_bar: True
 
 model_checkpoint_config: 
-    dirpath: "checkpoints/diffusion/fp"
-    filename: unet_fp
+    dirpath: "checkpoints/diffusion/ternary"
+    filename: "t_unet_{epoch:02d}-{val_loss:.2f}"
 
 logger_config:
   type: "wandb"
   project: "diffusion"
-  name: "unet_fp"
+  name: "unet_t"
   save_dir: "logs/"
   log_model: false
  
 quantization_config:
-  quant_type: null
+  quant_type: "t"

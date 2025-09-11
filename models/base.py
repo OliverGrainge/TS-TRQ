@@ -205,42 +205,65 @@ class QBaseModule(pl.LightningModule, ABC):
         losses_t = torch.stack([torch.as_tensor(l, device=self.device) for l in losses])
         return losses_t.mean() if reduction == "mean" else losses_t.sum()
 
-    # ------------- Diagnostics -------------
-
-    def ternary_vs_lr_ratio(self) -> Dict[str, Union[float, List[float]]]:
+    @torch.no_grad()
+    def global_ternary_vs_lr_ratio(self) -> float:
         """
-        Compute ternary vs. low-rank contribution ratios across TSVD layers.
-        Returns aggregate stats and raw values for histogram logging.
+        Compute global ternary vs. low-rank contribution ratio across all TSVD layers.
+        Memory-optimized version with streaming computation.
         """
-        default_stats = {"mean": 1.0, "median": 1.0, "min": 1.0, "max": 1.0, "values": [1.0]}
-        
         if not self.is_quantized or not getattr(self, "quant_type", None) or "tsvd" not in self.quant_type:
-            return default_stats
+            return 1.0
         
         if self.model is None:
-            return default_stats
+            return 1.0
 
-        ratios: List[float] = []
+        total_ternary = 0.0
+        total_lowrank = 0.0
+        layer_count = 0
+        
+        # Process one layer at a time to minimize memory usage
         for module in self.model.modules():
             if self._is_tsvd_layer(module):
                 try:
-                    ratio = self._compute_layer_ratio(module)
-                    if ratio is not None and torch.isfinite(ratio):
-                        ratios.append(float(ratio))
+                    # Compute ratio directly without storing intermediate values
+                    ratio_contribution = self._compute_layer_ratio_contribution(module)
+                    if ratio_contribution is not None:
+                        ternary_contrib, lowrank_contrib = ratio_contribution
+                        total_ternary += ternary_contrib
+                        total_lowrank += lowrank_contrib
+                        layer_count += 1
+                        
+                        # Clear any cached computations
+                        if hasattr(torch.cuda, 'empty_cache'):
+                            torch.cuda.empty_cache()
+                            
                 except Exception as e:
-                    print(f"Warning: Failed to compute ratio for module {type(module)}: {e}")
+                    print(f"Warning: Failed to compute contributions for module {type(module)}: {e}")
 
-        if not ratios:
-            return default_stats
+        if layer_count == 0 or total_lowrank == 0:
+            return 1.0
 
-        t = torch.tensor(ratios, device=self.device)
-        return {
-            "mean": float(t.mean().item()),
-            "median": float(t.median().item()),
-            "min": float(t.min().item()),
-            "max": float(t.max().item()),
-            "values": ratios,
-        }
+        return total_ternary / total_lowrank
+
+    @torch.no_grad()
+    def _compute_layer_ratio_contribution(self, module: torch.nn.Module) -> Optional[tuple[float, float]]:
+        """
+        Memory-efficient computation of layer contributions using sampling and norms.
+        """
+        device = next(module.parameters()).device
+        dtype = next(module.parameters()).dtype
+        
+        # Ternary contribution via norm
+        alpha_norm = float(module.alpha.abs().norm().item())
+        weight_norm = float(module.weight.norm().item())
+        ternary_contrib = alpha_norm * weight_norm
+
+        # Low-rank contribution via norm
+        L_norm = float(module.L.norm().item())
+        R_norm = float(module.R.norm().item()) 
+        lr_scalar_norm = float(module.lr_scalars.norm().item())
+        lowrank_contrib = lr_scalar_norm * L_norm * R_norm / (module.L.shape[0] ** 0.5)
+        return ternary_contrib, max(lowrank_contrib, 1e-8)
 
     @staticmethod
     def _is_tsvd_layer(module: torch.nn.Module) -> bool:
@@ -251,63 +274,18 @@ class QBaseModule(pl.LightningModule, ABC):
         required = ["alpha", "L", "R", "lr_scalars", "weight"]
         return all(hasattr(module, attr) for attr in required)
 
-    def _compute_layer_ratio(self, module: torch.nn.Module) -> Optional[torch.Tensor]:
+    @torch.no_grad()
+    def log_stats(self) -> float:
         """
-        Compute |alpha * ternary(W)| / |lr_scalars * (L @ R)| for a TSVD layer.
-        
-        Args:
-            module: TSVD quantized module
-            
-        Returns:
-            Ratio tensor or None if computation fails
-        """
-        try:
-            with torch.no_grad():
-                if hasattr(module, "ternary_quantize"):
-                    q_w, alpha, _, _ = module.ternary_quantize(module.weight, module.thresh_ratio)
-                else:
-                    q_w = torch.sign(module.weight)
-                    alpha = module.alpha
-
-                ternary_part = (alpha * q_w).abs().mean()
-
-                L = module.L.to(device=self.device, dtype=module.weight.dtype)
-                R = module.R.to(device=self.device, dtype=module.weight.dtype)
-                lr_scalars = module.lr_scalars.to(device=self.device, dtype=module.weight.dtype)
-
-                if L.numel() > 0 and R.numel() > 0:
-                    lowrank_part = (lr_scalars * (L @ R)).abs().mean()
-                else:
-                    lowrank_part = torch.tensor(1e-8, device=self.device)
-
-                eps = 1e-8
-                return ternary_part / (lowrank_part + eps)
-        except Exception as e:
-            print(f"Error computing layer ratio: {e}")
-            return None
-
-    def log_stats(self) -> Dict[str, Union[float, List[float]]]:
-        """
-        Log ternary vs. low-rank ratios to Lightning logger.
+        Log global ternary vs. low-rank ratio to Lightning logger.
         
         Returns:
-            Dictionary of computed statistics
+            The computed global ratio
         """
-        ratios = self.ternary_vs_lr_ratio()
-        for k, v in ratios.items():
-            if "value" not in k:
-                self.log(f"ternary_vs_LR_ratio/{k}", v, prog_bar=False, logger=True)
-        return ratios
-    
-    def validation_step(self, batch: Any, batch_idx: int) -> Optional[torch.Tensor]:
-        """
-        Default validation step - can be overridden by subclasses.
-        Logs quantization statistics during validation.
-        """
-        if self.is_quantized and batch_idx == 0:  # Only log once per validation epoch
-            self.log_stats()
-        return None
-    
+        ratio = self.global_ternary_vs_lr_ratio()
+        self.log("ternary_vs_LR_ratio/global", ratio, prog_bar=False, logger=True)
+        return ratio
+
     def get_model_info(self) -> Dict[str, Any]:
         """
         Get information about the current model state.

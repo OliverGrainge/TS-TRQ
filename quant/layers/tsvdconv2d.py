@@ -200,8 +200,8 @@ class TSVDConv2d(nn.Conv2d):
             R = Vh_r  # (rank, flattened_features)
 
         # Update buffers
-        self.L = L.detach()
-        self.R = R.detach()
+        self.L = L.detach().half()
+        self.R = R.detach().half()
 
         # Initialize per-channel alpha - alpha already has shape (out_channels, 1, 1, 1)
         self.alpha.data = alpha.detach()

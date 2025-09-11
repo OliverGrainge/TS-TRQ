@@ -209,6 +209,9 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
+            print(f"="*100)
+            print(f"Loading ResNetModule from checkpoint: {checkpoint}")
+            print(f"="*100)
             return ResNetModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return ResNetModule(**module_config)
@@ -217,6 +220,9 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
+            print(f"="*100)
+            print(f"Loading stablediffusion from checkpoint: {checkpoint}")
+            print(f"="*100)
             return StableDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return StableDiffusionModule(**module_config)
@@ -225,6 +231,9 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
+            print(f"="*100)
+            print(f"Loading diffusion from checkpoint: {checkpoint}")
+            print(f"="*100)
             return DiffusionModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return DiffusionModule(**module_config)

@@ -118,8 +118,8 @@ class TSVDLinear(nn.Linear):
             L = U_r * S_r.unsqueeze(0)
             R = Vh_r
 
-        self.L = L.detach()
-        self.R = R.detach()
+        self.L = L.detach().half()
+        self.R = R.detach().half()
         # Initialize per-channel alpha - alpha already has shape (out_features, 1)
         self.alpha.data = alpha.detach()
         self.lr_scalars.data.fill_(1.0)
