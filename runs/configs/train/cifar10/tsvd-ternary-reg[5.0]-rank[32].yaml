@@ -20,7 +20,7 @@ train_config:
 
 model_checkpoint_config: 
     dirpath: "checkpoints/pixel-diffusion/cifar10/tsvd-ternary/"
-    filename: "pixel-diffusion-tsvd-ternary_rank[16]_reg[0.25]_{epoch:02d}_{val_loss:.3f}"
+    filename: "pixel-diffusion-tsvd-ternary_rank[32]_reg[5.0]_{epoch:02d}_{val_loss:.3f}"
 
 logger_config:
   type: "wandb"
@@ -31,6 +31,6 @@ logger_config:
  
 quantization_config:
   quant_type: "tsvdconv2d"
-  reg_scale: 0.25
+  reg_scale: 5.0
   reg_type: "l2"
-  rank: 16
+  rank: 32
