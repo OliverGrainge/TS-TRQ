@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+load_dotenv()
 import os, numpy as np
 import pytorch_lightning as pl
 import torch
@@ -11,87 +12,49 @@ import warnings
 # Suppress PIL EXIF corruption warnings
 warnings.filterwarnings("ignore", "Corrupt EXIF data", UserWarning)
 
-def center_crop_arr(pil_image, image_size):
-    while min(*pil_image.size) >= 2 * image_size:
-        pil_image = pil_image.resize(tuple(x // 2 for x in pil_image.size), resample=Image.BOX)
-    scale = image_size / min(*pil_image.size)
-    pil_image = pil_image.resize(tuple(round(x * scale) for x in pil_image.size), resample=Image.BICUBIC)
-    arr = np.array(pil_image)
-    crop_y = (arr.shape[0] - image_size) // 2
-    crop_x = (arr.shape[1] - image_size) // 2
-    return Image.fromarray(arr[crop_y: crop_y + image_size, crop_x: crop_x + image_size])
 
 class ImageNetDataModule(pl.LightningDataModule):
-    def __init__(self, batch_size=32, num_workers=4, image_size=256, transform=None):
+    def __init__(self, batch_size=32, num_workers=4):
         super().__init__()
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_size = image_size
-        self.class_names = None  # optional; may remain None for WDS
-        default_transform = [
-            transforms.Lambda(lambda im: center_crop_arr(im, self.image_size)),
-            transforms.RandomHorizontalFlip(),
+
+        # Train transforms (no augmentation as discussed)
+        self.transform = transforms.Compose([
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(256),  # or RandomCrop for more augmentation
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5,0.5,0.5], std=[0.5,0.5,0.5], inplace=True),
-        ]
-        self.transform = transform or transforms.Compose(default_transform)
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
+        ])
 
     def setup(self, stage=None):
         load_dotenv()
         hf_token = os.getenv("HF_TOKEN", None)
         cache_dir = os.getenv("HF_DATASETS_CACHE", None)
 
-        # NOTE: This is the WDS-backed ImageNet-1k you downloaded
         common_kwargs = dict(
             cache_dir=cache_dir,
             download_config=DownloadConfig(delete_extracted=True),
             token=hf_token,
-            streaming=False,  # you downloaded to local cache; set True if you want iterable streaming
+            streaming=False,
         )
         self.train_dataset = load_dataset("timm/imagenet-1k-wds", split="train", **common_kwargs)
-        self.val_dataset   = load_dataset("timm/imagenet-1k-wds", split="validation", **common_kwargs)
+        self.val_dataset = load_dataset("timm/imagenet-1k-wds", split="validation", **common_kwargs)
 
-        # (Optional) try to populate class_names if metadata provides it
-        # Many WDS shards include 'json' with a 'synset' or 'label' string; fall back to None.
-        try:
-            probe = self.train_dataset[0]
-            if isinstance(probe.get("json", None), dict) and "synset" in probe["json"]:
-                # Build a simple index->synset list by scanning once (cheap vs dataset size)
-                # If not desired, you can remove this and just skip captions downstream.
-                index_to_name = {}
-                for item in self.train_dataset.select(range(min(5000, len(self.train_dataset)))):
-                    idx = int(item["cls"])
-                    name = item["json"].get("synset", str(idx))
-                    index_to_name.setdefault(idx, name)
-                max_idx = max(index_to_name) if index_to_name else -1
-                self.class_names = [index_to_name.get(i, str(i)) for i in range(max_idx+1)]
-        except Exception:
-            self.class_names = None  # safe default
-
-    def _collate_fn(self, batch):
-        images, labels, captions = [], [], []
+    def _collate_fn(self, batch, transform):
+        images, labels = [], []
         for item in batch:
             # WDS-backed HF dataset exposes image under 'jpg'
             img = item["jpg"]
             if not isinstance(img, Image.Image):
                 img = Image.fromarray(np.array(img))
-            img = self.transform(img.convert("RGB"))
+            img = transform(img.convert("RGB"))
             images.append(img)
-
-            label_idx = int(item["cls"])
-            labels.append(label_idx)
-
-            if self.class_names and 0 <= label_idx < len(self.class_names):
-                captions.append(self.class_names[label_idx])
-            else:
-                # try to use JSON synset/label if present; else just the index
-                meta = item.get("json", None)
-                name = meta.get("synset", None) if isinstance(meta, dict) else None
-                captions.append(name if name is not None else str(label_idx))
+            labels.append(int(item["cls"]))
 
         images = torch.stack(images)
         labels = torch.tensor(labels, dtype=torch.long)
-        return {"pixel_values": images, "labels": labels, "captions": captions}
+        return {"pixel_values": images, "labels": labels}
 
     def train_dataloader(self):
         return DataLoader(
@@ -100,7 +63,7 @@ class ImageNetDataModule(pl.LightningDataModule):
             shuffle=True,
             num_workers=self.num_workers,
             pin_memory=torch.cuda.is_available(),
-            collate_fn=self._collate_fn,
+            collate_fn=lambda batch: self._collate_fn(batch, self.transform),
         )
 
     def val_dataloader(self):
@@ -110,10 +73,22 @@ class ImageNetDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             pin_memory=torch.cuda.is_available(),
-            collate_fn=self._collate_fn,
+            collate_fn=lambda batch: self._collate_fn(batch, self.transform),
         )
 
-    def get_class_names(self):
-        if self.class_names is None:
-            raise ValueError("Class names not available for this dataset variant.")
-        return self.class_names
+
+    # Example usage
+if __name__ == "__main__":
+    # Initialize the datamodule
+    dm = ImageNetDataModule(batch_size=32, num_workers=4)
+
+    # Setup the datasets
+    dm.setup()
+
+    # Get a sample batch
+    train_loader = dm.train_dataloader()
+    batch = next(iter(train_loader))
+    print(f"Batch keys: {batch.keys()}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")
+    print(f"Labels shape: {batch['labels'].shape}")
+    print(f"Labels: {batch['labels']}")

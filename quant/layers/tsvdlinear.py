@@ -139,7 +139,7 @@ class TSVDLinear(nn.Linear):
         L = self.L.to(device=x.device, dtype=x.dtype)
         R = self.R.to(device=x.device, dtype=x.dtype)
 
-        if self.rank > 0 and L.numel() != 0 and R.numel() != 0:
+        if self.rank > 0 and L.numel() != 0 and R.numel() != 0 and self.training:
             E_lr = (self.lr_scalars.to(x.dtype) * L) @ R
             # Check for NaN in low-rank correction
             if not torch.isfinite(E_lr).all():

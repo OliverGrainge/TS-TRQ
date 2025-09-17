@@ -40,14 +40,6 @@ class QBaseModule(pl.LightningModule, ABC):
         
     
     @abstractmethod
-    def setup_model(self) -> None:
-        """
-        Initialize the main model components (unet, etc.).
-        Must be implemented by subclasses.
-        """
-        pass
-    
-    @abstractmethod
     def forward(self, *args, **kwargs) -> Any:
         """
         Forward pass implementation.

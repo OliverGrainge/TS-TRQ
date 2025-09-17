@@ -1,5 +1,6 @@
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 import pytorch_lightning as pl
 import torch
 from datasets import DownloadConfig, load_dataset
@@ -7,8 +8,6 @@ from dotenv import load_dotenv
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-
-load_dotenv()
 
 
 class HuggingFaceLSUNBedroomDataset(Dataset):
@@ -25,14 +24,11 @@ class HuggingFaceLSUNBedroomDataset(Dataset):
         item = self.hf_dataset[idx]
         image = item["image"]  # This is already a PIL Image
 
-        # LSUN bedroom dataset typically doesn't have labels, so we'll use a dummy label
-        # or you can modify this based on your specific needs
-        label = 0  # Dummy label for bedroom class
 
         if self.transform:
             image = self.transform(image)
 
-        return {"pixel_values": image, "labels": label}
+        return {"pixel_values": image}
 
 
 class LSUNBedroomDataModule(pl.LightningDataModule):
@@ -40,7 +36,6 @@ class LSUNBedroomDataModule(pl.LightningDataModule):
         self,
         batch_size=32,
         num_workers=4,
-        image_size=256,  # LSUN bedrooms are typically 256x256
         cache_dir=None,  # HuggingFace cache directory
         download=True,
     ):
@@ -49,7 +44,6 @@ class LSUNBedroomDataModule(pl.LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_size = image_size
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
         self.download = download
 
@@ -57,25 +51,14 @@ class LSUNBedroomDataModule(pl.LightningDataModule):
         self.hf_token = os.getenv("HF_TOKEN")
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
 
-        # Train transforms with data augmentation for bedrooms
-        train_transform = [
-            transforms.RandomHorizontalFlip(),  # Standard augmentation
-            transforms.Resize((self.image_size, self.image_size)),
+        # Train transforms with data augmentation
+        self.transform = transforms.Compose([
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(256),  # or RandomCrop for more augmentation
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]
-            ),  # Standard normalization
-        ]
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
+        ])
 
-        # Validation transforms: just resize and normalize
-        val_transform = [
-            transforms.Resize((self.image_size, self.image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
-        ]
-
-        self.train_transform = transforms.Compose(train_transform)
-        self.val_transform = transforms.Compose(val_transform)
 
     def setup(self, stage=None):
         """Setup datasets for training and validation"""
@@ -90,10 +73,10 @@ class LSUNBedroomDataModule(pl.LightningDataModule):
 
         # Wrap HuggingFace datasets with PyTorch Dataset wrapper
         self.train_dataset = HuggingFaceLSUNBedroomDataset(
-            ds["train"], transform=self.train_transform
+            ds["train"], transform=self.transform
         )
         self.test_dataset = HuggingFaceLSUNBedroomDataset(
-            ds["test"], transform=self.val_transform
+            ds["test"], transform=self.transform
         )
 
         print(f"Training dataset size: {len(self.train_dataset)}")
@@ -136,6 +119,4 @@ if __name__ == "__main__":
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
     print(f"Batch keys: {batch.keys()}")
-    print(f"Pixel values shape: {batch['pixel_values'].shape}")
-    print(f"Labels shape: {batch['labels'].shape}")
-    print(f"Labels: {batch['labels']}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")

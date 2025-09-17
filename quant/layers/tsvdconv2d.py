@@ -224,7 +224,7 @@ class TSVDConv2d(nn.Conv2d):
         L = self.L.to(device=x.device, dtype=x.dtype)
         R = self.R.to(device=x.device, dtype=x.dtype)
 
-        if self.rank > 0 and L.numel() != 0 and R.numel() != 0:
+        if self.rank > 0 and L.numel() != 0 and R.numel() != 0 and self.training:
             # Compute low-rank correction
             E_lr_flat = (
                 self.lr_scalars.view(-1, 1).to(x.dtype) * L

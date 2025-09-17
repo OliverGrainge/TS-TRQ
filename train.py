@@ -204,18 +204,7 @@ def get_module(module_config):
     """Load and return the specified model module"""
     module_type = module_config.pop("module_type", "vit")
 
-    if module_type == "resnet":
-        from models import ResNetModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            print(f"="*100)
-            print(f"Loading ResNetModule from checkpoint: {checkpoint}")
-            print(f"="*100)
-            return ResNetModule.load_from_checkpoint(checkpoint, **module_config)
-        else:
-            return ResNetModule(**module_config)
-    elif module_type == "stablediffusion":
+    if module_type == "stablediffusion":
         from models import StableDiffusionModule
 
         checkpoint = module_config.pop("checkpoint", None)
@@ -226,7 +215,7 @@ def get_module(module_config):
             return StableDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
         else:
             return StableDiffusionModule(**module_config)
-    elif module_type == "diffusion":
+    elif module_type == "latent-diffusion":
         from models import DiffusionModule
 
         checkpoint = module_config.pop("checkpoint", None)
@@ -234,9 +223,21 @@ def get_module(module_config):
             print(f"="*100)
             print(f"Loading diffusion from checkpoint: {checkpoint}")
             print(f"="*100)
-            return DiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+            return LatentDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
         else:
-            return DiffusionModule(**module_config)
+            return LatentDiffusionModule(**module_config)
+
+    elif module_type == "pixel-diffusion":
+        from models import PixelDiffusionModule
+
+        checkpoint = module_config.pop("checkpoint", None)
+        if checkpoint is not None:
+            print(f"="*100)
+            print(f"Loading diffusion from checkpoint: {checkpoint}")
+            print(f"="*100)
+            return PixelDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+        else:
+            return PixelDiffusionModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
 
@@ -265,17 +266,10 @@ def create_model_checkpoint_callback(model_checkpoint_config):
     """Create ModelCheckpoint callback from configuration"""
     from pathlib import Path
 
-    filename_prefix = (
-        model_checkpoint_config.pop("filename_prefix", "")
-        if "filename_prefix" in model_checkpoint_config
-        else ""
-    )
-
     # Set defaults if not provided
     config = {
         "monitor": "val_loss",
-        "filename": f"{filename_prefix}{{epoch:02d}}-{{val_loss:.2f}}",
-        "save_top_k": 2,
+        "filename": model_checkpoint_config.get("filename", "{epoch:02d}-{val_loss:.2f}"),
         "mode": "min",
         **model_checkpoint_config,
     }

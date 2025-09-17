@@ -1,4 +1,3 @@
-
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -7,7 +6,6 @@ import torch.nn.functional as F
 from dotenv import load_dotenv
 import pytorch_lightning as pl
 from tqdm import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer
 from pytorch_lightning.loggers import WandbLogger
 from diffusers import (
     UNet2DModel,
@@ -15,58 +13,133 @@ from diffusers import (
     AutoencoderKL,
     EulerAncestralDiscreteScheduler,
 )
+
 from data import ImageNetDataModule
 from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
-from .base import QBaseModule  # Import the base class
+from .base import QBaseModule
 
 
-
-# -------------------------
-# Stable Diffusion loaders
-# -------------------------
-def load_diffusion_model() -> Dict[str, Any]:
+def _load_unet(
+    model_type: str, 
+    in_channels: int = 4, 
+    class_conditional: bool = False, 
+    num_classes: Optional[int] = None
+) -> UNet2DModel:
     """
-    Load VAE, text encoder, tokenizer, UNet, and schedulers for Stable Diffusion.
+    Load UNet with different size configurations.
+    
+    Args:
+        model_type: Size of the model ("tiny", "small", "base")
+        in_channels: Number of input channels
+        class_conditional: Whether to use class conditioning
+        num_classes: Number of classes for class conditioning
+    
+    Returns:
+        UNet2DModel configured for the specified size
+    """
+    configs = {
+        "tiny": {
+            "sample_size": 32,
+            "block_out_channels": (128, 128, 256, 256),
+            "down_block_types": ("DownBlock2D", "DownBlock2D", "DownBlock2D", "AttnDownBlock2D"),
+            "up_block_types": ("AttnUpBlock2D", "UpBlock2D", "UpBlock2D", "UpBlock2D"),
+            "attention_head_dim": 8,
+            "layers_per_block": 1,
+        },
+        "small": {
+            "sample_size": 32,
+            "block_out_channels": (128, 256, 512, 512),
+            "down_block_types": ("DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"),
+            "up_block_types": ("AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"),
+            "attention_head_dim": 8,
+            "layers_per_block": 2,
+        },
+        "base": {
+            "sample_size": 32,
+            "block_out_channels": (320, 640, 1280, 1280),
+            "down_block_types": ("DownBlock2D", "DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"),
+            "up_block_types": ("AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D", "UpBlock2D"),
+            "attention_head_dim": 8,
+            "layers_per_block": 2,
+        },
+    }
+    
+    if model_type not in configs:
+        raise ValueError(f"model_type must be one of {list(configs.keys())}, got {model_type}")
+    
+    config = configs[model_type]
+    
+    # Build UNet configuration
+    unet_kwargs = {
+        "sample_size": config["sample_size"],
+        "in_channels": in_channels,
+        "out_channels": in_channels,
+        "down_block_types": config["down_block_types"],
+        "up_block_types": config["up_block_types"],
+        "block_out_channels": config["block_out_channels"],
+        "layers_per_block": config["layers_per_block"],
+        "attention_head_dim": config["attention_head_dim"],
+        "norm_num_groups": 32,
+    }
+    
+    # Add class conditioning if requested
+    if class_conditional:
+        if num_classes is None:
+            raise ValueError("num_classes must be provided when class_conditional=True")
+        unet_kwargs.update({
+            "class_embed_type": "timestep",
+            "num_class_embeds": num_classes,
+        })
+    
+    return UNet2DModel(**unet_kwargs)
+
+
+def load_diffusion_model(
+    model_size: str = "base", 
+    in_channels: int = 4, 
+    class_conditional: bool = False, 
+    num_classes: Optional[int] = None,
+    pixel_space: bool = False
+) -> Dict[str, Any]:
+    """
+    Load VAE, UNet, and schedulers for Stable Diffusion.
 
     Args:
-        pretrained: Whether to load a pretrained UNet or create from config.
+        model_size: Size of UNet model ("tiny", "small", "base")
+        in_channels: Number of input channels for UNet
+        class_conditional: Whether to use class conditioning
+        num_classes: Number of classes for conditioning
 
     Returns:
-        Dictionary with keys:
-        ['vae', 'text_encoder', 'tokenizer', 'unet',
-         'train_noise_scheduler', 'inference_noise_scheduler']
+        Dictionary with model components
     """
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE")
 
-    vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir=cache_dir)
+    # Load VAE
+    if not pixel_space:
+        vae = AutoencoderKL.from_pretrained("stabilityai/sd-vae-ft-ema", cache_dir=cache_dir)
+    else: 
+        vae = None
 
-    unet = UNet2DModel(
-        class_embed_type="timestep",
-        num_class_embeds=1000,
-        
-        sample_size=128,  # Match your training resolution
-        in_channels=4,
-        out_channels=4,
-        
-        # Larger architecture for better quality
-        down_block_types=("DownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D", "AttnDownBlock2D"),
-        up_block_types=("AttnUpBlock2D", "AttnUpBlock2D", "AttnUpBlock2D", "UpBlock2D"),
-        block_out_channels=(128, 256, 512, 1024), 
-        
-        layers_per_block=2,
-        attention_head_dim=16,  # Increased from 8
-        norm_num_groups=32,
+    # Load UNet with specified configuration
+    unet = _load_unet(
+        model_type=model_size,
+        in_channels=in_channels,
+        class_conditional=class_conditional,
+        num_classes=num_classes,
     )
 
-
+    # Create schedulers
     train_noise_scheduler = DDPMScheduler(
         num_train_timesteps=1000,
-        beta_schedule="scaled_linear",  # Better than linear
+        beta_schedule="scaled_linear",
         beta_start=0.00085,
         beta_end=0.012,
         clip_sample=False,
     )
-    inference_noise_scheduler = EulerAncestralDiscreteScheduler.from_config(train_noise_scheduler.config)
+    inference_noise_scheduler = EulerAncestralDiscreteScheduler.from_config(
+        train_noise_scheduler.config
+    )
 
     return {
         "vae": vae,
@@ -76,202 +149,179 @@ def load_diffusion_model() -> Dict[str, Any]:
     }
 
 
-# ---------------------------------
-# Lightning training module
-# ---------------------------------
-class DiffusionModule(QBaseModule):
+class LatentDiffusionModule(QBaseModule):
+    """
+    PyTorch Lightning module for training latent diffusion models.
+    
+    This module wraps UNet training for diffusion models with optional
+    class conditioning and quantization support.
+    """
+    
     def __init__(
         self,
-        batch_size: int,
         learning_rate: float = 2e-4,
+        weight_decay: float = 0.01,
+        model_size: str = "small", 
+        class_conditional: bool = False, 
+        num_classes: Optional[int] = None,
         *args,
         **kwargs
     ):
-        """
-        Minimal Stable Diffusion training wrapper around UNet + text encoder.
-
-        Args:
-            learning_rate: Optimizer LR.
-        """
         super().__init__(*args, **kwargs)
         self.save_hyperparameters()
 
         self.learning_rate = learning_rate
-        self.batch_size = batch_size
+        self.model_size = model_size
+        self.class_conditional = class_conditional
+        self.num_classes = num_classes
+        self.weight_decay = weight_decay
 
-        # Load core components
-        model_dict = load_diffusion_model()
+        # Load model components
+        self._load_models(model_size, class_conditional, num_classes)
+
+    def _load_models(self, model_size: str, class_conditional: bool, num_classes: Optional[int]) -> None:
+        """Load and initialize all model components."""
+        model_dict = load_diffusion_model(
+            model_size=model_size, 
+            in_channels=4, 
+            class_conditional=class_conditional, 
+            num_classes=num_classes
+        )
+        
         self.vae = model_dict["vae"]
-        self.unet = model_dict["unet"]
-
-        # Set the model for the base class
-        self.model = self.unet
-
-        # Schedulers
+        self.model = model_dict["unet"]
+        
         self.train_noise_scheduler = model_dict["train_noise_scheduler"]
         self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
-
-        # Freeze VAE
+        
+        # Freeze VAE during training
         self.vae.requires_grad_(False)
 
-    def setup_model(self) -> None:
-        """
-        Initialize the main model components (unet, etc.).
-        Implementation of abstract method from QBaseModule.
-        """
-        if self.model is None:
-            model_dict = load_diffusion_model()
-            self.vae = model_dict["vae"]
-            self.unet = model_dict["unet"]
-            self.model = self.unet
-            
-            self.train_noise_scheduler = model_dict["train_noise_scheduler"]
-            self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
-            
-            # Freeze VAE
-            self.vae.requires_grad_(False)
-
-    # ------------- Forward / Steps -------------
-
     def forward(
-        self, pixel_values: torch.Tensor, labels: torch.Tensor
+        self, 
+        pixel_values: torch.Tensor, 
+        labels: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        One training forward pass:
-          VAE encode -> add noise -> UNet predict noise
+        Forward pass for training: VAE encode -> add noise -> UNet predict noise.
+        
+        Args:
+            pixel_values: Input images
+            labels: Class labels (optional)
+            
+        Returns:
+            Tuple of (predicted_noise, target_noise)
         """
-        bsz = pixel_values.shape[0]
+        batch_size = pixel_values.shape[0]
 
-        # Latents
+        # Encode to latent space
         with torch.no_grad():
             latents = self.vae.encode(pixel_values).latent_dist.sample()
             latents = latents * self.vae.config.scaling_factor
             latents = latents.to(self.device)
-            assert latents.shape[1] == self.unet.config.in_channels
 
-        # Noise + timesteps
+        # Generate noise and timesteps
         noise = torch.randn_like(latents)
         timesteps = torch.randint(
             0,
             self.train_noise_scheduler.config.num_train_timesteps,
-            (bsz,),
+            (batch_size,),
             device=latents.device,
         ).long()
 
+        # Add noise to latents
         noisy_latents = self.train_noise_scheduler.add_noise(latents, noise, timesteps)
 
-        # UNet predicts noise residual
-        model_pred = self.unet(
-            noisy_latents, timesteps, class_labels=labels
-        ).sample
+        # Predict noise
+        if labels is None:
+            model_pred = self.model(noisy_latents, timesteps).sample
+        else:
+            model_pred = self.model(noisy_latents, timesteps, class_labels=labels).sample
 
         return model_pred, noise
 
     def training_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
+        """Training step."""
         pixel_values = batch["pixel_values"]
-        labels = batch["labels"]
+        labels = batch.get("labels")
 
         model_pred, target = self.forward(pixel_values, labels)
+        
+        # Calculate losses
         mse_loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         reg_loss = self.reg_loss()
-        loss = mse_loss + reg_loss
+        total_loss = mse_loss + reg_loss
 
-        self.log("mse_loss", mse_loss, prog_bar=True)  # keep original logging keys/values
+        # Log metrics
+        self.log("mse_loss", mse_loss, prog_bar=True)
         self.log("reg_loss", reg_loss)
-        self.log("train_loss", loss)
+        self.log("train_loss", total_loss)
 
         if self.global_step % 500 == 0:
             self.log_stats()
 
-        return loss
+        return total_loss
 
     def validation_step(self, batch: Dict[str, Any], batch_idx: int) -> torch.Tensor:
+        """Validation step."""
         pixel_values = batch["pixel_values"]
-        labels = batch["labels"]
-        # Support both 'caption' and 'captions' without changing existing behavior.
+        self.image_height = pixel_values.shape[2]
+        self.image_width = pixel_values.shape[3]
+        labels = batch.get("labels")
 
         model_pred, target = self.forward(pixel_values, labels)
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+        
         self.log("val_loss", loss)
         
-        # Call parent validation_step for quantization statistics logging
+        # Call parent for quantization statistics
         super().validation_step(batch, batch_idx)
         
         return loss
 
     def on_validation_epoch_end(self) -> None:
+        """Generate sample images at end of validation epoch."""
+        if self.class_conditional:
+            class_type = torch.randint(0, self.num_classes, (1,))
+        else:
+            class_type = None
+
         imgs = self.generate(
             batch_size=1,
-            height=128,
-            width=128,
+            height=self.image_height * 2,
+            width=self.image_width * 2,
             num_inference_steps=100,
+            class_type=class_type
         )
-        self.logger.log_image(key="samples", images=imgs)
-
-    # ------------- Optimizer -------------
+        self.logger.log_image(key="samples", images=imgs, caption=class_type)
 
     def configure_optimizers(self):
+        """Configure optimizer."""
         return torch.optim.AdamW(
-            list(self.unet.parameters()),
+            self.model.parameters(),
             lr=self.learning_rate,
             betas=(0.9, 0.999),
-            weight_decay=1e-2,
+            weight_decay=self.weight_decay,
             eps=1e-8,
         )
 
-
     def _get_ignore_conv2d_patterns(self) -> List[str]:
-        """
-        Get patterns for Conv2d layer names to ignore during quantization.
-        These layers are critical for model stability and should remain full precision.
-        """
+        """Get Conv2d layer patterns to ignore during quantization."""
         return [
-            # Input/Output layers - critical for maintaining data flow
-            "conv_in",           # Initial input convolution
-            "conv_out",          # Final output convolution
-
-            # Deeper layers in the network - more sensitive to quantization
-            #"down_blocks.2",     # Third down block (512 channels)
-            "down_blocks.3",     # Fourth down block (1024 channels) 
-            "up_blocks.0",       # First up block (1024 channels)
-            #"up_blocks.1",       # Second up block (512 channels)
-            "mid_block",         # Middle block - bottleneck, most critical
-            
-            
-            # Shortcut connections - maintain residual flow
-            "conv_shortcut",     # Skip connections in ResNet blocks
-            
-            # Small kernel convolutions that are already efficient
-            # Note: 1x1 convs are often used for dimension matching and are lightweight
+            "conv_in",           # Input convolution
+            "conv_out",          # Output convolution
+            "conv_shortcut",     # Skip connections
         ]
 
     def _get_ignore_linear_patterns(self) -> List[str]:
-        """
-        Get patterns for Linear layer names to ignore during quantization.
-        These layers handle embeddings and attention which need higher precision.
-        """
+        """Get Linear layer patterns to ignore during quantization."""
         return [
-            # Time embedding layers - critical for diffusion timestep conditioning
-            "time_embedding",    # Timestep embeddings
-            "time_emb_proj",
-            "linear_1",          # First linear layer in time embeddings
-            "linear_2",          # Second linear layer in time embeddings
-            
-            # Class embedding layers - for conditional generation
-            "class_embedding",   # Class conditioning embeddings
-            
-            # Time projection layers
-            "time_emb_proj",     # Time embedding projections into ResNet blocks
-            
-            # First and last layers of attention (most sensitive)
-            # You might want to be more selective here based on performance
-            # "to_q",            # Query projection - consider keeping these
-            # "to_k",            # Key projection - consider keeping these  
-            # "to_v",            # Value projection - consider keeping these
-            # "to_out.0",        # Output projection - consider keeping these
+            "time_embedding",    # Time embeddings
+            "time_emb_proj",     # Time projections
+            "linear_1",          # Time embedding layers
+            "linear_2",
+            "class_embedding",   # Class embeddings
         ]
-
-    # ------------- Inference (Generation) -------------
 
     @torch.no_grad()
     def generate(
@@ -286,50 +336,221 @@ class DiffusionModule(QBaseModule):
         class_type: int = 1,
     ) -> Union[List["Image.Image"], torch.Tensor]:
         """
-        Unconditional image generation using the current UNet model.
+        Generate images using the trained UNet model.
+        
+        Args:
+            height: Generated image height
+            width: Generated image width
+            num_inference_steps: Number of denoising steps
+            generator: Random generator for reproducibility
+            return_pil: Whether to return PIL images or tensors
+            batch_size: Number of images to generate
+            pbar: Whether to show progress bar
+            class_type: Class label for conditional generation
+            
+        Returns:
+            Generated images as PIL Images or tensors
         """
-        # Keep original device move behavior (even though Lightning manages device)
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        device = next(self.parameters()).device
         self.eval()
-        self.to(device)
-        self.vae.to(device)
-        self.unet.to(device)
 
         scheduler = self.inference_noise_scheduler or self.train_noise_scheduler
 
-        # Initial noise (latent space is 8x downsampled)
+        # Initialize latents
         latents = torch.randn(
-            (batch_size, self.unet.config.in_channels, height // 8, width // 8),
+            (batch_size, self.model.config.in_channels, height // 8, width // 8),
             generator=generator,
             device=device,
-            dtype=torch.float32,  # Use explicit dtype since we don't have text_embeddings
+            dtype=torch.float32,
         )
 
         scheduler.set_timesteps(num_inference_steps, device=device)
         timesteps = scheduler.timesteps
         latents = latents * scheduler.init_noise_sigma
 
+        # Class labels for conditional generation
         labels = torch.tensor([class_type] * batch_size, device=device)
 
-        # Denoising loop - unconditional generation
-        for _, t in tqdm(enumerate(timesteps), total=len(timesteps), disable=not pbar):
-            latent_in = scheduler.scale_model_input(latents.to(device), timestep=t)
-            
-            # Unconditional UNet forward pass (no encoder_hidden_states)
-            noise_pred = self.unet(latent_in, t, class_labels=labels).sample
-            
+        # Denoising loop
+        for t in tqdm(timesteps, disable=not pbar, desc="Generating"):
+            latent_in = scheduler.scale_model_input(latents, timestep=t)
+            noise_pred = self.model(latent_in, t, class_labels=labels).sample
             latents = scheduler.step(noise_pred, t, latents).prev_sample
 
         # Decode to images
-        latents = latents.to(device)
-        scaling = getattr(self.vae.config, "scaling_factor", 0.18215)
-        images = self.vae.decode(latents / scaling).sample
+        scaling_factor = getattr(self.vae.config, "scaling_factor", 0.18215)
+        images = self.vae.decode(latents / scaling_factor).sample
         images = (images / 2 + 0.5).clamp(0, 1)
 
         if not return_pil:
             return images
 
-        # To PIL
+        # Convert to PIL images
         np_imgs = (images.detach().cpu().permute(0, 2, 3, 1).numpy() * 255).round().astype("uint8")
-        from PIL import Image  # local import to avoid top-level dependency when unused
+        from PIL import Image
+        return [Image.fromarray(img) for img in np_imgs]
+
+
+
+
+
+class PixelDiffusionModule(LatentDiffusionModule):
+    """
+    PyTorch Lightning module for training pixel-space diffusion models.
+    
+    This module wraps UNet training for diffusion models working directly
+    on pixel values without VAE encoding/decoding.
+    """
+    
+    def __init__(
+        self,
+        learning_rate: float = 2e-4,
+        weight_decay: float = 0.01,
+        model_size: str = "small", 
+        class_conditional: bool = False, 
+        num_classes: Optional[int] = None,
+        *args,
+        **kwargs
+    ):
+        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, model_size=model_size, class_conditional=class_conditional, num_classes=num_classes, *args, **kwargs)
+
+    def _load_models(self, model_size: str, class_conditional: bool, num_classes: Optional[int]) -> None:
+        """Load and initialize all model components."""
+        model_dict = load_diffusion_model(
+            model_size=model_size, 
+            in_channels=3,  # UNet now works directly with pixel channels
+            class_conditional=class_conditional, 
+            num_classes=num_classes,
+            pixel_space=True  # Add this flag to your model loading function
+        )
+        
+        self.model = model_dict["unet"]
+        
+        self.train_noise_scheduler = model_dict["train_noise_scheduler"]
+        self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
+
+    def forward(
+        self, 
+        pixel_values: torch.Tensor, 
+        labels: Optional[torch.Tensor] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass for training: normalize pixels -> add noise -> UNet predict noise.
+        
+        Args:
+            pixel_values: Input images [B, C, H, W] in range [0, 1]
+            labels: Class labels (optional)
+            
+        Returns:
+            Tuple of (predicted_noise, target_noise)
+        """
+        batch_size = pixel_values.shape[0]
+
+        pixels = pixel_values  # Assume normalization to [-1, 1] is already done
+        assert pixels.min() >= -1.0 and pixels.max() <= 1.0 # pixels must be in [-1, 1] range
+        pixels = pixels.to(self.device)
+
+        # Generate noise and timesteps
+        noise = torch.randn_like(pixels)
+        timesteps = torch.randint(
+            0,
+            self.train_noise_scheduler.config.num_train_timesteps,
+            (batch_size,),
+            device=pixels.device,
+        ).long()
+
+        # Add noise to pixels
+        noisy_pixels = self.train_noise_scheduler.add_noise(pixels, noise, timesteps)
+
+        # Predict noise
+        if labels is None:
+            model_pred = self.model(noisy_pixels, timesteps).sample
+        else:
+            model_pred = self.model(noisy_pixels, timesteps, class_labels=labels).sample
+
+        return model_pred, noise
+
+
+    def _get_ignore_linear_patterns(self) -> List[str]:
+        """Get Linear layer patterns to ignore during quantization."""
+        return [
+            "time_embedding",    # Time embeddings
+            "time_emb_proj",     # Time projections
+            "linear_1",          # Time embedding layers
+            "linear_2",
+            "class_embedding",   # Class embeddings
+        ]
+
+    @torch.no_grad()
+    def generate(
+        self,
+        height: int = 128,
+        width: int = 128,
+        num_inference_steps: int = 50,
+        generator: Optional[torch.Generator] = None,
+        return_pil: bool = True,
+        batch_size: int = 1,
+        pbar: bool = False,
+        class_type: int = 1,
+    ) -> Union[List["Image.Image"], torch.Tensor]:
+        """
+        Generate images using the trained UNet model in pixel space.
+        
+        Args:
+            height: Generated image height
+            width: Generated image width
+            num_inference_steps: Number of denoising steps
+            generator: Random generator for reproducibility
+            return_pil: Whether to return PIL images or tensors
+            batch_size: Number of images to generate
+            pbar: Whether to show progress bar
+            class_type: Class label for conditional generation
+            
+        Returns:
+            Generated images as PIL Images or tensors
+        """
+        device = next(self.parameters()).device
+        self.eval()
+
+        scheduler = self.inference_noise_scheduler or self.train_noise_scheduler
+
+        # Initialize pixel noise directly (no latent space)
+        pixels = torch.randn(
+            (batch_size, 3, height, width),
+            generator=generator,
+            device=device,
+            dtype=torch.float32,
+        )
+
+        scheduler.set_timesteps(num_inference_steps, device=device)
+        timesteps = scheduler.timesteps
+        pixels = pixels * scheduler.init_noise_sigma
+
+        # Class labels for conditional generation
+        if self.class_conditional:
+            labels = torch.tensor([class_type] * batch_size, device=device)
+        else:
+            labels = None
+
+        # Denoising loop
+        for t in tqdm(timesteps, disable=not pbar, desc="Generating"):
+            pixel_in = scheduler.scale_model_input(pixels, timestep=t)
+            
+            if labels is None:
+                noise_pred = self.model(pixel_in, t).sample
+            else:
+                noise_pred = self.model(pixel_in, t, class_labels=labels).sample
+                
+            pixels = scheduler.step(noise_pred, t, pixels).prev_sample
+
+        # Convert from [-1, 1] back to [0, 1]
+        images = (pixels + 1.0) / 2.0
+        images = images.clamp(0, 1)
+
+        if not return_pil:
+            return images
+
+        # Convert to PIL images
+        np_imgs = (images.detach().cpu().permute(0, 2, 3, 1).numpy() * 255).round().astype("uint8")
+        from PIL import Image
         return [Image.fromarray(img) for img in np_imgs]

@@ -1,5 +1,6 @@
 import os
-
+from dotenv import load_dotenv
+load_dotenv()
 import pytorch_lightning as pl
 import torch
 from datasets import DownloadConfig, load_dataset
@@ -35,7 +36,6 @@ class CIFAR10DataModule(pl.LightningDataModule):
         self,
         batch_size=32,
         num_workers=4,
-        image_size=32,  # Changed to 224 for ViT compatibility
         cache_dir=None,  # HuggingFace cache directory
         download=True,
     ):
@@ -44,35 +44,19 @@ class CIFAR10DataModule(pl.LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_size = image_size
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
         self.download = download
 
         # Get HuggingFace token if available
         self.hf_token = os.getenv("HF_TOKEN")
 
-        # Train transforms with data augmentation
-        train_transform = [
-            transforms.RandomCrop(32, padding=4),  # Standard for CIFAR-100
-            transforms.RandomHorizontalFlip(),  # Standard for CIFAR-100
-            transforms.Resize((self.image_size, self.image_size)),  # For ViT
+        self.transform = transforms.Compose([
+            transforms.Resize(32, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(32),  # or RandomCrop for more augmentation
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]
-            ),
-        ]
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
+        ])
 
-        # Validation transforms: just resize and normalize
-        val_transform = [
-            transforms.Resize((self.image_size, self.image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]
-            ),
-        ]
-
-        self.train_transform = transforms.Compose(train_transform)
-        self.val_transform = transforms.Compose(val_transform)
 
     def setup(self, stage=None):
         """Setup datasets for training and validation"""
@@ -99,10 +83,10 @@ class CIFAR10DataModule(pl.LightningDataModule):
 
         # Wrap HuggingFace datasets with PyTorch Dataset wrapper
         self.train_dataset = HuggingFaceCIFAR10Dataset(
-            train_hf_dataset, transform=self.train_transform
+            train_hf_dataset, transform=self.transform
         )
         self.val_dataset = HuggingFaceCIFAR10Dataset(
-            val_hf_dataset, transform=self.val_transform
+            val_hf_dataset, transform=self.transform
         )
 
         print(f"Training dataset size: {len(self.train_dataset)}")
@@ -138,14 +122,13 @@ if __name__ == "__main__":
     # Initialize the datamodule
     dm = CIFAR10DataModule(batch_size=32, num_workers=4)
 
-    # Setup the datasets
+    # Setup the dataset
     dm.setup()
 
     # Get a sample batch
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
-
     print(f"Batch keys: {batch.keys()}")
-    print(f"Pixel values shape: {batch['pixel_values'].shape}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")
     print(f"Labels shape: {batch['labels'].shape}")
     print(f"Labels: {batch['labels']}")

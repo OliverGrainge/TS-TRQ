@@ -1,14 +1,13 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 import pytorch_lightning as pl
 import torch
 from datasets import DownloadConfig, load_dataset
-from dotenv import load_dotenv
 from PIL import Image
 from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
-
-load_dotenv()
 
 
 class HuggingFaceLSUNChurchesDataset(Dataset):
@@ -24,12 +23,11 @@ class HuggingFaceLSUNChurchesDataset(Dataset):
     def __getitem__(self, idx):
         item = self.hf_dataset[idx]
         image = item["image"]  # This is already a PIL Image
-        label = item["label"]  # CIFAR100 uses 'fine_label' for the 100 classes
 
         if self.transform:
             image = self.transform(image)
 
-        return {"pixel_values": image, "labels": label}
+        return {"pixel_values": image}
 
 
 class LSUNChurchesDataModule(pl.LightningDataModule):
@@ -37,7 +35,6 @@ class LSUNChurchesDataModule(pl.LightningDataModule):
         self,
         batch_size=32,
         num_workers=4,
-        image_size=224,  # Changed to 224 for ViT compatibility (was 32)
         cache_dir=None,  # HuggingFace cache directory
         download=True,
     ):
@@ -46,7 +43,6 @@ class LSUNChurchesDataModule(pl.LightningDataModule):
 
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.image_size = image_size
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
         self.download = download
 
@@ -55,27 +51,13 @@ class LSUNChurchesDataModule(pl.LightningDataModule):
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
 
         # Train transforms with data augmentation
-        train_transform = [
-            transforms.RandomCrop(32, padding=4),  # Standard for CIFAR-100
-            transforms.RandomHorizontalFlip(),  # Standard for CIFAR-100
-            transforms.Resize((self.image_size, self.image_size)),  # For ViT
+        self.transform = transforms.Compose([
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
+            transforms.CenterCrop(256),  # or RandomCrop for more augmentation
             transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]
-            ),
-        ]
+            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
+        ])
 
-        # Validation transforms: just resize and normalize
-        val_transform = [
-            transforms.Resize((self.image_size, self.image_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=[0.5071, 0.4867, 0.4408], std=[0.2675, 0.2565, 0.2761]
-            ),
-        ]
-
-        self.train_transform = transforms.Compose(train_transform)
-        self.val_transform = transforms.Compose(val_transform)
 
     def setup(self, stage=None):
         """Setup datasets for training and validation"""
@@ -85,10 +67,10 @@ class LSUNChurchesDataModule(pl.LightningDataModule):
 
         # Wrap HuggingFace datasets with PyTorch Dataset wrapper
         self.train_dataset = HuggingFaceLSUNChurchesDataset(
-            ds["train"], transform=self.train_transform
+            ds["train"], transform=self.transform
         )
         self.test_dataset = HuggingFaceLSUNChurchesDataset(
-            ds["test"], transform=self.val_transform
+            ds["test"], transform=self.transform
         )
 
         print(f"Training dataset size: {len(self.train_dataset)}")
@@ -131,6 +113,4 @@ if __name__ == "__main__":
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
     print(f"Batch keys: {batch.keys()}")
-    print(f"Pixel values shape: {batch['pixel_values'].shape}")
-    print(f"Labels shape: {batch['labels'].shape}")
-    print(f"Labels: {batch['labels']}")
+    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")
