@@ -65,7 +65,7 @@ class LSUNBedroomDataModule(pl.LightningDataModule):
 
         cache_dir = self.cache_dir or os.getenv("HF_DATASETS_CACHE", None)
         ds = load_dataset(
-            "tglcourse/lsun_church_train",
+            "pcuenq/lsun-bedrooms",
             cache_dir=cache_dir,
             download_config=DownloadConfig(delete_extracted=True),
             trust_remote_code=True,

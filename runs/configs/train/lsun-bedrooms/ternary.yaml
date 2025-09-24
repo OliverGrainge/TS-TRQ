@@ -1,0 +1,38 @@
+
+
+
+module_config: 
+    checkpoint: "/home/oeg1n18/TS-TRQ/checkpoints/latent-diffusion/lsun-bedrooms/fp/latent-diffusion-lsun-bedrooms-fp_epoch=14_val_loss=0.171.ckpt"
+    module_type: "latent-diffusion" 
+    learning_rate: 0.0001
+    weight_decay: 0.01
+    model_size: "small"
+    class_conditional: False
+    num_classes: null
+
+datamodule_config: 
+    dataset: "lsun-bedrooms"
+    batch_size: 32
+    num_workers: 8 
+
+train_config: 
+    accelerator: "auto" 
+    strategy: "auto"
+    precision: "bf16-mixed"
+    max_epochs: 100
+    enable_progress_bar: False
+
+model_checkpoint_config: 
+    dirpath: "checkpoints/latent-diffusion/lsun-bedrooms/tsvd-ternary/"
+    filename: "latent-diffusion-lsun-bedrooms-tsvd-ternary_{epoch:02d}_{val_loss:.3f}"
+
+logger_config:
+  type: "wandb"
+  project: "latent-diffusion-lsun-bedrooms"
+  name: "ternary"
+  save_dir: "logs/"
+  log_model: false
+ 
+
+quantization_config:
+  quant_type: "t"

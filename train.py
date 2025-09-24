@@ -216,7 +216,7 @@ def get_module(module_config):
         else:
             return StableDiffusionModule(**module_config)
     elif module_type == "latent-diffusion":
-        from models import DiffusionModule
+        from models import LatentDiffusionModule
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
@@ -258,6 +258,14 @@ def get_datamodule(datamodule_config):
         from data import CIFAR10DataModule
 
         return CIFAR10DataModule(**datamodule_config)
+    elif dataset == "lsun-bedrooms":
+        from data import LSUNBedroomDataModule
+
+        return LSUNBedroomDataModule(**datamodule_config)
+    elif dataset == "lsun-churches":
+        from data import LSUNChurchesDataModule
+
+        return LSUNChurchesDataModule(**datamodule_config)
     else:
         raise ValueError(f"Invalid dataset: {dataset}")
 
@@ -370,7 +378,6 @@ def main():
     trainer_kwargs = {
         "callbacks": [checkpoint_callback],
         "logger": logger,
-        "log_every_n_steps": 5,
         "gradient_clip_val": 1.0,
         **train_config,
     }

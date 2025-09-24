@@ -8,14 +8,14 @@ module_config:
 
 datamodule_config: 
     dataset: "cifar10"
-    batch_size: 256
+    batch_size: 512
     num_workers: 8 
 
 train_config: 
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    max_epochs: 150
+    max_epochs: 300
     enable_progress_bar: True
 
 model_checkpoint_config: 

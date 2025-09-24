@@ -33,7 +33,7 @@ def download_lsun_bedroom():
     try:
         print("Downloading LSUN Bedroom dataset...")
         ds = load_dataset(
-            "tglcourse/lsun_bedroom_train",
+            "pcuenq/lsun-bedrooms",
             cache_dir=cache_dir,
             download_config=DownloadConfig(delete_extracted=True),
             trust_remote_code=True,

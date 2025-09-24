@@ -293,7 +293,11 @@ class LatentDiffusionModule(QBaseModule):
             num_inference_steps=100,
             class_type=class_type
         )
-        self.logger.log_image(key="samples", images=imgs, caption=class_type)
+        if self.class_conditional:
+            self.logger.log_image(key="samples", images=imgs, caption=class_type)
+        else: 
+            self.logger.log_image(key="samples", images=imgs)
+
 
     def configure_optimizers(self):
         """Configure optimizer."""
@@ -368,13 +372,21 @@ class LatentDiffusionModule(QBaseModule):
         timesteps = scheduler.timesteps
         latents = latents * scheduler.init_noise_sigma
 
-        # Class labels for conditional generation
-        labels = torch.tensor([class_type] * batch_size, device=device)
+        # Class labels for conditional generation (if needed)
+        labels = None
+        if self.class_conditional: 
+            labels = torch.tensor([class_type] * batch_size, device=device)
 
         # Denoising loop
         for t in tqdm(timesteps, disable=not pbar, desc="Generating"):
             latent_in = scheduler.scale_model_input(latents, timestep=t)
-            noise_pred = self.model(latent_in, t, class_labels=labels).sample
+            
+            # Conditional model call
+            if self.class_conditional:
+                noise_pred = self.model(latent_in, t, class_labels=labels).sample
+            else:
+                noise_pred = self.model(latent_in, t).sample
+            
             latents = scheduler.step(noise_pred, t, latents).prev_sample
 
         # Decode to images
@@ -389,6 +401,7 @@ class LatentDiffusionModule(QBaseModule):
         np_imgs = (images.detach().cpu().permute(0, 2, 3, 1).numpy() * 255).round().astype("uint8")
         from PIL import Image
         return [Image.fromarray(img) for img in np_imgs]
+
 
 
 

@@ -7,6 +7,7 @@ Usage:
 
 import os
 from dotenv import load_dotenv
+load_dotenv()
 from datasets import DownloadConfig, load_dataset
 from huggingface_hub.constants import HF_HOME, HF_HUB_CACHE
 
@@ -15,8 +16,7 @@ def download_imagenet():
     """
     Download and cache ImageNet-1K dataset splits.
     """
-    # Load environment variables from .env file
-    load_dotenv()
+
     
     # Optionally use a HuggingFace token from the environment
     hf_token = os.getenv("HF_TOKEN")
