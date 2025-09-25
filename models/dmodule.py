@@ -12,6 +12,7 @@ from diffusers import (
     DDPMScheduler,
     AutoencoderKL,
     EulerAncestralDiscreteScheduler,
+    DDPMPipeline
 )
 
 from data import ImageNetDataModule
@@ -94,7 +95,27 @@ def _load_unet(
     return UNet2DModel(**unet_kwargs)
 
 
+
+def load_pretrained_diffusion(model_id: str) -> Dict[str, Any]: 
+    if model_id in ["google/ddpm-ema-church-256", "google/ddpm-ema-bedroom-256", "google/ddpm-cifar10-32"]:
+        model_dict = {} 
+        pipeline = DDPMPipeline.from_pretrained(model_id)
+        model_dict["unet"] = pipeline.unet
+        model_dict["train_noise_scheduler"] = pipeline.scheduler 
+        schd = EulerAncestralDiscreteScheduler.from_config(
+            model_dict["train_noise_scheduler"].config
+        )
+        schd.config.use_karras_sigmas = True        # smoother noise schedule -> higher quality/fewer steps
+        schd.config.timestep_spacing = "trailing"
+        schd.set_timesteps(40)
+        model_dict["inference_noise_scheduler"] = schd
+        model_dict["vae"] = None
+        return model_dict
+    else:
+        raise ValueError(f"Invalid model ID: {model_id}")
+
 def load_diffusion_model(
+    model_id: Union[str, None] = None,
     model_size: str = "base", 
     in_channels: int = 4, 
     class_conditional: bool = False, 
@@ -114,6 +135,8 @@ def load_diffusion_model(
         Dictionary with model components
     """
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE")
+    if model_id is not None: 
+        return load_pretrained_diffusion(model_id)
 
     # Load VAE
     if not pixel_space:
@@ -129,17 +152,27 @@ def load_diffusion_model(
         num_classes=num_classes,
     )
 
-    # Create schedulers
     train_noise_scheduler = DDPMScheduler(
-        num_train_timesteps=1000,
-        beta_schedule="scaled_linear",
-        beta_start=0.00085,
-        beta_end=0.012,
-        clip_sample=False,
-    )
+    num_train_timesteps=1000,
+    beta_schedule="scaled_linear",  # keep as-is if that's how you trained
+    beta_start=0.00085,
+    beta_end=0.012,
+    clip_sample=False,
+    prediction_type="epsilon",      # <-- make this explicit; change only if you truly trained with "v_prediction"
+)
+
+    # Inference scheduler: start from the train config, then override *inference-only* goodies
     inference_noise_scheduler = EulerAncestralDiscreteScheduler.from_config(
         train_noise_scheduler.config
     )
+    # Recommended inference-only tweaks for Euler-A:
+    inference_noise_scheduler.config.use_karras_sigmas = True        # smoother noise schedule -> higher quality/fewer steps
+    inference_noise_scheduler.config.timestep_spacing = "trailing"   # denser steps at the end; often best for Euler/DPM samplers
+    # (Alternative: "leading" or "linspace". "trailing" tends to improve detail/texture with few steps.)
+
+    # When sampling:
+    num_inference_steps = 40  # try 20–40 for 256x256 LSUN
+    inference_noise_scheduler.set_timesteps(num_inference_steps)
 
     return {
         "vae": vae,
@@ -162,6 +195,7 @@ class LatentDiffusionModule(QBaseModule):
         learning_rate: float = 2e-4,
         weight_decay: float = 0.01,
         model_size: str = "small", 
+        model_id: Union[str, None] = None,
         class_conditional: bool = False, 
         num_classes: Optional[int] = None,
         *args,
@@ -175,6 +209,7 @@ class LatentDiffusionModule(QBaseModule):
         self.class_conditional = class_conditional
         self.num_classes = num_classes
         self.weight_decay = weight_decay
+        self.model_id = model_id
 
         # Load model components
         self._load_models(model_size, class_conditional, num_classes)
@@ -183,6 +218,7 @@ class LatentDiffusionModule(QBaseModule):
         """Load and initialize all model components."""
         model_dict = load_diffusion_model(
             model_size=model_size, 
+            model_id=self.model_id,
             in_channels=4, 
             class_conditional=class_conditional, 
             num_classes=num_classes
@@ -420,17 +456,19 @@ class PixelDiffusionModule(LatentDiffusionModule):
         learning_rate: float = 2e-4,
         weight_decay: float = 0.01,
         model_size: str = "small", 
+        model_id: Union[str, None] = None,
         class_conditional: bool = False, 
         num_classes: Optional[int] = None,
         *args,
         **kwargs
     ):
-        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, model_size=model_size, class_conditional=class_conditional, num_classes=num_classes, *args, **kwargs)
+        super().__init__(learning_rate=learning_rate, weight_decay=weight_decay, model_size=model_size, class_conditional=class_conditional, num_classes=num_classes, model_id=model_id, *args, **kwargs)
 
     def _load_models(self, model_size: str, class_conditional: bool, num_classes: Optional[int]) -> None:
         """Load and initialize all model components."""
         model_dict = load_diffusion_model(
             model_size=model_size, 
+            model_id=self.model_id,
             in_channels=3,  # UNet now works directly with pixel channels
             class_conditional=class_conditional, 
             num_classes=num_classes,

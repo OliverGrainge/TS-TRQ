@@ -1,5 +1,5 @@
 """
-Download Stable Diffusion VAE from HuggingFace and save to local cache.
+Download Stable Diffusion VAE and DDPM models from HuggingFace and save to local cache.
 
 Usage:
     python downloads/download_diff.py
@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from diffusers import AutoencoderKL
+from diffusers import AutoencoderKL, DDPMPipeline
 
 
 def download_unet_vae():
@@ -36,5 +36,36 @@ def download_unet_vae():
         raise
 
 
+def download_ddpm_models():
+    """
+    Download and cache DDPM models.
+    """
+    
+    cache_dir = os.getenv("HF_TRANSFORMERS_CACHE", None)
+    
+    model_ids = [
+        "google/ddpm-ema-church-256",
+        "google/ddpm-ema-bedroom-256", 
+        "google/ddpm-cifar10-32"
+    ]
+    
+    for model_id in model_ids:
+        try:
+            print(f"Downloading {model_id} to {cache_dir}")
+            print(f"Downloading {model_id}...")
+            pipeline = DDPMPipeline.from_pretrained(
+                model_id,
+                cache_dir=cache_dir
+            )
+            print(f"{model_id} downloaded and cached.")
+            
+        except Exception as e:
+            print(f"Error downloading {model_id}: {e}")
+            raise
+    
+    print("All DDPM models download complete.")
+
+
 if __name__ == "__main__":
     download_unet_vae()
+    download_ddpm_models()
