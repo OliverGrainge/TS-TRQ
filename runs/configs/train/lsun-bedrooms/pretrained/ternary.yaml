@@ -1,5 +1,5 @@
 module_config: 
-    model_id: "google/ddpm-ema-church-256"
+    model_id: "google/ddpm-ema-bedroom-256"
     module_type: "pixel-diffusion" 
     learning_rate: 0.0001
     weight_decay: 0.01
@@ -9,15 +9,18 @@ module_config:
 
 datamodule_config: 
     dataset: "lsun-bedrooms"
-    batch_size: 8 #32
+    batch_size: 12 #32
     num_workers: 8 
 
 train_config: 
+    max_steps: 1000 
+    val_check_interval: 1000 
+    limit_val_batches: 100
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    max_epochs: 300
-    enable_progress_bar: False
+    enable_progress_bar: True
+    log_every_n_steps: 10
 
 model_checkpoint_config: 
     dirpath: "checkpoints/pixel-diffusion/lsun-bedrooms/ternary/"

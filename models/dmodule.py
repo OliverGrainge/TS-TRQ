@@ -96,10 +96,10 @@ def _load_unet(
 
 
 
-def load_pretrained_diffusion(model_id: str) -> Dict[str, Any]: 
+def load_pretrained_diffusion(model_id: str, cache_dir: Optional[str] = None) -> Dict[str, Any]: 
     if model_id in ["google/ddpm-ema-church-256", "google/ddpm-ema-bedroom-256", "google/ddpm-cifar10-32"]:
         model_dict = {} 
-        pipeline = DDPMPipeline.from_pretrained(model_id)
+        pipeline = DDPMPipeline.from_pretrained(model_id, cache_dir=cache_dir)
         model_dict["unet"] = pipeline.unet
         model_dict["train_noise_scheduler"] = pipeline.scheduler 
         schd = EulerAncestralDiscreteScheduler.from_config(
@@ -136,7 +136,7 @@ def load_diffusion_model(
     """
     cache_dir = os.getenv("HF_TRANSFORMERS_CACHE")
     if model_id is not None: 
-        return load_pretrained_diffusion(model_id)
+        return load_pretrained_diffusion(model_id, cache_dir=cache_dir)
 
     # Load VAE
     if not pixel_space:

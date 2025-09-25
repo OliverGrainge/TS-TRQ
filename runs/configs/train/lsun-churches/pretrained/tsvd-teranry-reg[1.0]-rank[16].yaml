@@ -9,14 +9,16 @@ module_config:
 
 datamodule_config: 
     dataset: "lsun-churches"
-    batch_size: 8 #32
+    batch_size: 12 #32
     num_workers: 8 
 
 train_config: 
+    max_steps: 1000 
+    val_check_interval: 1000 
+    limit_val_batches: 100
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    max_epochs: 300
     enable_progress_bar: True
 
 model_checkpoint_config: 
