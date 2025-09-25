@@ -1,0 +1,37 @@
+module_config: 
+    model_id: "google/ddpm-ema-church-256"
+    module_type: "pixel-diffusion" 
+    learning_rate: 0.0001
+    weight_decay: 0.01
+    model_size: "small"
+    class_conditional: False
+    num_classes: null
+
+datamodule_config: 
+    dataset: "lsun-churches"
+    batch_size: 8 #32
+    num_workers: 8 
+
+train_config: 
+    accelerator: "auto" 
+    strategy: "auto"
+    precision: "bf16-mixed"
+    max_epochs: 300
+    enable_progress_bar: True
+
+model_checkpoint_config: 
+    dirpath: "checkpoints/pixel-diffusion/lsun-churches/tsvd/"
+    filename: "pixel-diffusion-lsun-churches-tsvd_{epoch:02d}_{val_loss:.3f}"
+
+logger_config:
+  type: "wandb"
+  project: "pixel-diffusion-lsun-churches"
+  name: "tsvd-teranry-reg[1.0]-rank[16]"
+  save_dir: "logs/"
+  log_model: false
+ 
+quantization_config:
+  quant_type: "tsvd"
+  reg_scale: 1.0
+  reg_type: "l2"
+  rank: 16
