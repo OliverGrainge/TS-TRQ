@@ -521,6 +521,14 @@ class PixelDiffusionModule(LatentDiffusionModule):
 
         return model_pred, noise
 
+    def _get_ignore_conv2d_patterns(self) -> List[str]:
+        """Get Conv2d layer patterns to ignore during quantization."""
+        return [
+            "conv_in",           # Input convolution
+            "conv_out",          # Output convolution
+            "conv_shortcut",     # Skip connections
+            "c",
+        ]
 
     def _get_ignore_linear_patterns(self) -> List[str]:
         """Get Linear layer patterns to ignore during quantization."""

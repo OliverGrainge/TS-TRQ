@@ -96,6 +96,7 @@ class TSVDLinear(nn.Linear):
             and torch.isfinite(Vh).all()
         ):
             print(f"Warning: SVD produced non-finite values, using zero initialization")
+            
             r = min(self.rank, self.weight.shape[0], self.weight.shape[1])
             L = torch.zeros(
                 self.weight.shape[0],
@@ -125,7 +126,7 @@ class TSVDLinear(nn.Linear):
         self.lr_scalars.data.fill_(1.0)
 
     def forward(self, x):
-        x = self.norm(x)
+        #x = self.norm(x) 
         q_nograd, _, _, _ = ternary_quantize(self.weight, self.thresh_ratio)
         q = ste_hard_replace(self.weight, q_nograd)
         w_q = self.alpha * q  # Use learnable alpha

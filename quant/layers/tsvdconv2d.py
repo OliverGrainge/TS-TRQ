@@ -169,35 +169,14 @@ class TSVDConv2d(nn.Conv2d):
 
         # Perform SVD
         U, S, Vh = torch.linalg.svd(E_flat, full_matrices=False)
+    
+        r = min(self.rank, S.numel())
+        U_r = U[:, :r]
+        S_r = S[:r]
+        Vh_r = Vh[:r, :]
 
-        # Check SVD results for NaN/Inf
-        if not (
-            torch.isfinite(U).all()
-            and torch.isfinite(S).all()
-            and torch.isfinite(Vh).all()
-        ):
-            print(f"Warning: SVD produced non-finite values, using zero initialization")
-            r = min(self.rank, original_shape[0], E_flat.shape[1])
-            L = torch.zeros(
-                original_shape[0],
-                r,
-                dtype=self.weight.dtype,
-                device=self.weight.device,
-            )
-            R = torch.zeros(
-                r,
-                E_flat.shape[1],
-                dtype=self.weight.dtype,
-                device=self.weight.device,
-            )
-        else:
-            r = min(self.rank, S.numel())
-            U_r = U[:, :r]
-            S_r = S[:r]
-            Vh_r = Vh[:r, :]
-
-            L = U_r * S_r.unsqueeze(0)  # (out_channels, rank)
-            R = Vh_r  # (rank, flattened_features)
+        L = U_r * S_r.unsqueeze(0)  # (out_channels, rank)
+        R = Vh_r  # (rank, flattened_features)
 
         # Update buffers
         self.L = L.detach().half()
@@ -208,7 +187,7 @@ class TSVDConv2d(nn.Conv2d):
         self.lr_scalars.data.fill_(1.0)
 
     def forward(self, x):
-        x = self.norm(x)
+        #x = self.norm(x)
 
         # Get ternary quantization
         q_nograd, _, _, _ = ternary_quantize_conv(self.weight, self.thresh_ratio)
