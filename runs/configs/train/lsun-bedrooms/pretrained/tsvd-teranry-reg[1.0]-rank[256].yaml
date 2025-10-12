@@ -13,9 +13,9 @@ datamodule_config:
     num_workers: 8 
 
 train_config: 
-    max_steps: 1000 
-    val_check_interval: 1000 
-    limit_val_batches: 100
+    max_steps: 100000 
+    val_check_interval: 3000 
+    limit_val_batches: 200
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
@@ -29,7 +29,7 @@ model_checkpoint_config:
 logger_config:
   type: "wandb"
   project: "pixel-diffusion-lsun-bedrooms"
-  name: "tsvd-ternary-reg[1.0]-rank[16]"
+  name: "tsvd-ternary-reg[1.0]-rank[256]"
   save_dir: "logs/"
   log_model: false
  
@@ -37,4 +37,4 @@ quantization_config:
   quant_type: "tsvd"
   reg_scale: 1.0
   reg_type: "l2"
-  rank: 16
+  rank: 256

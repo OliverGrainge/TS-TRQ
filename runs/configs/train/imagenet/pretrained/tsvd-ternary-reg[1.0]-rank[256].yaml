@@ -1,20 +1,23 @@
 module_config: 
-    model_id: "google/ddpm-ema-church-256"
-    module_type: "pixel-diffusion" 
-    learning_rate: 0.0001
-    weight_decay: 0.01
-    model_size: "small"
-    class_conditional: False
-    num_classes: null
+    model_id: "facebook/DiT-XL-2-256"
+    module_type: "latent-diffusion" 
+    learning_rate: 0.00001
+    weight_decay: 0.00
+    class_conditional: True
+    num_classes: 1000
+    use_cfg: True 
+    guidance_scale: 4.0
+    cfg_null_class: 1000
+    cfg_dropout: 0.1
 
 datamodule_config: 
-    dataset: "lsun-churches"
+    dataset: "imagenet"
     batch_size: 12 #32
     num_workers: 8 
 
 train_config: 
-    max_steps: 100000 
-    val_check_interval: 3000
+    max_steps: 200000 
+    val_check_interval: 1000
     limit_val_batches: 200
     accelerator: "auto" 
     strategy: "auto"
@@ -28,10 +31,13 @@ model_checkpoint_config:
 
 logger_config:
   type: "wandb"
-  project: "pixel-diffusion-lsun-churches"
+  project: "latent-dit-imagenet"
   name: "ternary"
   save_dir: "logs/"
   log_model: false
- 
+
 quantization_config:
-  quant_type: "t"
+  quant_type: "tsvd"
+  reg_scale: 1.0
+  reg_type: "l2"
+  rank: 256

@@ -45,7 +45,7 @@ class TSVDLinear(nn.Linear):
 
         # Layer-wise scalars for LR approximation
         self.lr_scalars = nn.Parameter(torch.ones(out_features, 1))
-        self.norm = nn.RMSNorm(normalized_shape=in_features)
+       #self.norm = nn.RMSNorm(normalized_shape=in_features)
 
     @classmethod
     def from_linear(

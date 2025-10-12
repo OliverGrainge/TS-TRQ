@@ -12,20 +12,21 @@ from diffusers import (
     DDPMScheduler,
     AutoencoderKL,
     EulerAncestralDiscreteScheduler,
-    DDPMPipeline
+    DDPMPipeline,
+    DiTPipeline
 )
-
+import torch.nn as nn
 from data import ImageNetDataModule
 from quant import quantize_model, get_all_conv2d_names, get_all_linear_names
-from .base import QBaseModule
+from models.base import QBaseModule
 
 
-def _load_unet(
+def _load_model(
     model_type: str, 
     in_channels: int = 4, 
     class_conditional: bool = False, 
     num_classes: Optional[int] = None
-) -> UNet2DModel:
+) -> nn.Module:
     """
     Load UNet with different size configurations.
     
@@ -100,7 +101,7 @@ def load_pretrained_diffusion(model_id: str, cache_dir: Optional[str] = None) ->
     if model_id in ["google/ddpm-ema-church-256", "google/ddpm-ema-bedroom-256", "google/ddpm-cifar10-32"]:
         model_dict = {} 
         pipeline = DDPMPipeline.from_pretrained(model_id, cache_dir=cache_dir)
-        model_dict["unet"] = pipeline.unet
+        model_dict["model"] = pipeline.unet
         model_dict["train_noise_scheduler"] = pipeline.scheduler 
         schd = EulerAncestralDiscreteScheduler.from_config(
             model_dict["train_noise_scheduler"].config
@@ -111,6 +112,19 @@ def load_pretrained_diffusion(model_id: str, cache_dir: Optional[str] = None) ->
         model_dict["inference_noise_scheduler"] = schd
         model_dict["vae"] = None
         return model_dict
+    
+    elif model_id in ["facebook/DiT-XL-2-256"]:
+        model_dict = {}
+        pipeline = DiTPipeline.from_pretrained(model_id, cache_dir=cache_dir)
+        model_dict["model"] = pipeline.transformer 
+        model_dict["inference_noise_scheduler"] = pipeline.scheduler
+        model_dict["vae"] = pipeline.vae 
+        model_dict["train_noise_scheduler"] = DDPMScheduler(
+            num_train_timesteps=1000,
+            beta_schedule="squaredcos_cap_v2",  # Cosine schedule
+            prediction_type="epsilon",  # or "v_prediction"
+        )
+        return model_dict 
     else:
         raise ValueError(f"Invalid model ID: {model_id}")
 
@@ -145,7 +159,7 @@ def load_diffusion_model(
         vae = None
 
     # Load UNet with specified configuration
-    unet = _load_unet(
+    model = _load_model(
         model_type=model_size,
         in_channels=in_channels,
         class_conditional=class_conditional,
@@ -176,11 +190,10 @@ def load_diffusion_model(
 
     return {
         "vae": vae,
-        "unet": unet,
+        "model": model,
         "train_noise_scheduler": train_noise_scheduler,
         "inference_noise_scheduler": inference_noise_scheduler,
     }
-
 
 class LatentDiffusionModule(QBaseModule):
     """
@@ -198,6 +211,10 @@ class LatentDiffusionModule(QBaseModule):
         model_id: Union[str, None] = None,
         class_conditional: bool = False, 
         num_classes: Optional[int] = None,
+        use_cfg: bool = False,
+        cfg_scale: float = 4.0, 
+        cfg_null_class: int = 1000,
+        cfg_dropout: float = 0.1, 
         *args,
         **kwargs
     ):
@@ -210,6 +227,10 @@ class LatentDiffusionModule(QBaseModule):
         self.num_classes = num_classes
         self.weight_decay = weight_decay
         self.model_id = model_id
+        self.use_cfg = use_cfg
+        self.cfg_scale = cfg_scale 
+        self.cfg_null_class = cfg_null_class 
+        self.cfg_dropout = cfg_dropout 
 
         # Load model components
         self._load_models(model_size, class_conditional, num_classes)
@@ -225,13 +246,14 @@ class LatentDiffusionModule(QBaseModule):
         )
         
         self.vae = model_dict["vae"]
-        self.model = model_dict["unet"]
+        self.model = model_dict["model"]
         
         self.train_noise_scheduler = model_dict["train_noise_scheduler"]
         self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
         
         # Freeze VAE during training
         self.vae.requires_grad_(False)
+
 
     def forward(
         self, 
@@ -281,7 +303,16 @@ class LatentDiffusionModule(QBaseModule):
         pixel_values = batch["pixel_values"]
         labels = batch.get("labels")
 
+        if self.class_conditional and labels is not None and self.use_cfg and self.cfg_dropout > 0:
+            batch_size = labels.shape[0]
+            dropout_mask = torch.rand(batch_size, device=labels.device) < self.cfg_dropout
+            if dropout_mask.any():
+                labels = labels.clone()
+                labels[dropout_mask] = self.cfg_null_class
+
         model_pred, target = self.forward(pixel_values, labels)
+        n_channels = target.shape[1] 
+        model_pred = model_pred[:, :n_channels, :, :]
         
         # Calculate losses
         mse_loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
@@ -306,6 +337,8 @@ class LatentDiffusionModule(QBaseModule):
         labels = batch.get("labels")
 
         model_pred, target = self.forward(pixel_values, labels)
+        n_channels = target.shape[1] 
+        model_pred = model_pred[:, :n_channels, :, :]
         loss = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
         
         self.log("val_loss", loss)
@@ -324,15 +357,18 @@ class LatentDiffusionModule(QBaseModule):
 
         imgs = self.generate(
             batch_size=1,
-            height=self.image_height * 2,
-            width=self.image_width * 2,
+            height=self.image_height,
+            width=self.image_width,
             num_inference_steps=100,
             class_type=class_type
         )
-        if self.class_conditional:
-            self.logger.log_image(key="samples", images=imgs, caption=class_type)
-        else: 
-            self.logger.log_image(key="samples", images=imgs)
+        try:
+            if self.class_conditional:
+                self.logger.log_image(key="samples", images=imgs, caption=class_type)
+            else: 
+                self.logger.log_image(key="samples", images=imgs)
+        except: 
+            pass
 
 
     def configure_optimizers(self):
@@ -366,8 +402,8 @@ class LatentDiffusionModule(QBaseModule):
     @torch.no_grad()
     def generate(
         self,
-        height: int = 128,
-        width: int = 128,
+        height: int = 256,
+        width: int = 256,
         num_inference_steps: int = 50,
         generator: Optional[torch.Generator] = None,
         return_pil: bool = True,
@@ -376,7 +412,7 @@ class LatentDiffusionModule(QBaseModule):
         class_type: int = 1,
     ) -> Union[List["Image.Image"], torch.Tensor]:
         """
-        Generate images using the trained UNet model.
+        Generate images using the trained UNet model with optional CFG.
         
         Args:
             height: Generated image height
@@ -408,21 +444,61 @@ class LatentDiffusionModule(QBaseModule):
         timesteps = scheduler.timesteps
         latents = latents * scheduler.init_noise_sigma
 
-        # Class labels for conditional generation (if needed)
+        # Determine if we're using CFG
+        use_cfg = self.class_conditional and self.cfg_scale > 1.0
+
+        # Prepare class labels
         labels = None
-        if self.class_conditional: 
+        if self.class_conditional:
             labels = torch.tensor([class_type] * batch_size, device=device)
 
         # Denoising loop
-        for t in tqdm(timesteps, disable=not pbar, desc="Generating"):
+        for t in tqdm(timesteps, disable=not pbar, desc="Generating", total=len(timesteps)):
             latent_in = scheduler.scale_model_input(latents, timestep=t)
-            
-            # Conditional model call
-            if self.class_conditional:
-                noise_pred = self.model(latent_in, t, class_labels=labels).sample
+            if use_cfg:
+                # ========== CLASSIFIER-FREE GUIDANCE ==========
+                # Duplicate latents for batch processing
+                latent_model_input = torch.cat([latent_in] * 2)
+                labels_uncond = torch.tensor([self.cfg_null_class] * batch_size, device=device)
+                timestep = torch.tensor([t], device=device, dtype=torch.long)
+                # Also duplicate timestep
+                timestep = timestep.repeat(2)
+
+                labels_combined = torch.cat([labels_uncond, labels])
+                
+                model_output = self.model(
+                    latent_model_input,
+                    timestep=timestep,
+                    class_labels=labels_combined
+                ).sample
+
+                # CRITICAL: Extract only the noise prediction channels (first half)
+                # DiT outputs 8 channels: 4 for noise + 4 for variance
+                latent_channels = self.model.config.in_channels  # Should be 4
+                model_output = model_output[:, :latent_channels]  # Keep only first 4 channels
+                
+                # Split predictions
+                noise_pred_uncond, noise_pred_cond = model_output.chunk(2)
+                
+                # Apply classifier-free guidance
+                noise_pred = noise_pred_uncond + self.cfg_scale * (
+                    noise_pred_cond - noise_pred_uncond
+                )
+                
             else:
-                noise_pred = self.model(latent_in, t).sample
+                # ========== STANDARD SAMPLING (no CFG) ==========
+                # Ensure timestep is 1D for DiT
+                if t.dim() == 0:
+                    timestep = t.unsqueeze(0).repeat(batch_size)
+                else:
+                    timestep = t.repeat(batch_size)
+                
+                if self.class_conditional:
+                    noise_pred = self.model(latent_in, timestep, class_labels=labels).sample
+                else:
+                    noise_pred = self.model(latent_in, timestep).sample
             
+            # Update latents
             latents = scheduler.step(noise_pred, t, latents).prev_sample
 
         # Decode to images
@@ -475,7 +551,7 @@ class PixelDiffusionModule(LatentDiffusionModule):
             pixel_space=True  # Add this flag to your model loading function
         )
         
-        self.model = model_dict["unet"]
+        self.model = model_dict["model"]
         
         self.train_noise_scheduler = model_dict["train_noise_scheduler"]
         self.inference_noise_scheduler = model_dict["inference_noise_scheduler"]
@@ -514,7 +590,7 @@ class PixelDiffusionModule(LatentDiffusionModule):
         noisy_pixels = self.train_noise_scheduler.add_noise(pixels, noise, timesteps)
 
         # Predict noise
-        if labels is None:
+        if labels is None or self.class_conditional == False:
             model_pred = self.model(noisy_pixels, timesteps).sample
         else:
             model_pred = self.model(noisy_pixels, timesteps, class_labels=labels).sample

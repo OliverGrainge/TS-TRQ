@@ -108,7 +108,7 @@ class TSVDConv2d(nn.Conv2d):
         self.lr_scalars = nn.Parameter(torch.ones(out_channels, 1, 1, 1))
 
         # RMSNorm (rms taken over input channels)
-        self.norm = ConvRMSNorm(in_channels)
+        #self.norm = ConvRMSNorm(in_channels)
 
     @classmethod
     def from_conv2d(
