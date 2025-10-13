@@ -108,7 +108,7 @@ class TSVDConv2d(nn.Conv2d):
         self.lr_scalars = nn.Parameter(torch.ones(out_channels, 1, 1, 1))
 
         # RMSNorm (rms taken over input channels)
-        #self.norm = ConvRMSNorm(in_channels)
+        # self.norm = ConvRMSNorm(in_channels)
 
     @classmethod
     def from_conv2d(
@@ -169,7 +169,7 @@ class TSVDConv2d(nn.Conv2d):
 
         # Perform SVD
         U, S, Vh = torch.linalg.svd(E_flat, full_matrices=False)
-    
+
         r = min(self.rank, S.numel())
         U_r = U[:, :r]
         S_r = S[:r]
@@ -187,7 +187,7 @@ class TSVDConv2d(nn.Conv2d):
         self.lr_scalars.data.fill_(1.0)
 
     def forward(self, x):
-        #x = self.norm(x)
+        # x = self.norm(x)
 
         # Get ternary quantization
         q_nograd, _, _, _ = ternary_quantize_conv(self.weight, self.thresh_ratio)
@@ -302,8 +302,6 @@ def compute_total_reg_loss(module):
         if isinstance(m, TSVDConv2d):
             total_loss += m.layer_reg_loss()
     return total_loss
-
-
 
 
 if __name__ == "__main__":

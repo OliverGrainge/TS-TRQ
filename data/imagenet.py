@@ -1,13 +1,16 @@
 from dotenv import load_dotenv
+
 load_dotenv()
-import os, numpy as np
+import os
+import warnings
+
+import numpy as np
 import pytorch_lightning as pl
 import torch
-from datasets import load_dataset, DownloadConfig
+from datasets import DownloadConfig, load_dataset
 from PIL import Image
 from torch.utils.data import DataLoader
 from torchvision import transforms
-import warnings
 
 # Suppress PIL EXIF corruption warnings
 warnings.filterwarnings("ignore", "Corrupt EXIF data", UserWarning)
@@ -20,12 +23,18 @@ class ImageNetDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
 
         # Train transforms (no augmentation as discussed)
-        self.transform = transforms.Compose([
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(256),  # or RandomCrop for more augmentation
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
-        ])
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    256, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.CenterCrop(256),  # or RandomCrop for more augmentation
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+                ),  # Scale to [-1, 1]
+            ]
+        )
 
     def setup(self, stage=None):
         load_dotenv()
@@ -38,8 +47,12 @@ class ImageNetDataModule(pl.LightningDataModule):
             token=hf_token,
             streaming=False,
         )
-        self.train_dataset = load_dataset("timm/imagenet-1k-wds", split="train", **common_kwargs)
-        self.val_dataset = load_dataset("timm/imagenet-1k-wds", split="validation", **common_kwargs)
+        self.train_dataset = load_dataset(
+            "timm/imagenet-1k-wds", split="train", **common_kwargs
+        )
+        self.val_dataset = load_dataset(
+            "timm/imagenet-1k-wds", split="validation", **common_kwargs
+        )
 
     def _collate_fn(self, batch, transform):
         images, labels = [], []
@@ -76,8 +89,9 @@ class ImageNetDataModule(pl.LightningDataModule):
             collate_fn=lambda batch: self._collate_fn(batch, self.transform),
         )
 
-
     # Example usage
+
+
 if __name__ == "__main__":
     # Initialize the datamodule
     dm = ImageNetDataModule(batch_size=32, num_workers=4)
@@ -89,6 +103,8 @@ if __name__ == "__main__":
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
     print(f"Batch keys: {batch.keys()}")
-    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")
+    print(
+        f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}"
+    )
     print(f"Labels shape: {batch['labels'].shape}")
     print(f"Labels: {batch['labels']}")

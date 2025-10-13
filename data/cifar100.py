@@ -1,5 +1,7 @@
 import os
+
 from dotenv import load_dotenv
+
 load_dotenv()
 import pytorch_lightning as pl
 import torch
@@ -51,13 +53,18 @@ class CIFAR100DataModule(pl.LightningDataModule):
         self.hf_token = os.getenv("HF_TOKEN")
 
         # Training transforms for CIFAR (32x32)
-        self.transform = transforms.Compose([
-            transforms.Resize(32, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(32),  # or RandomCrop for more augmentation
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
-        ])
-
+        self.transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    32, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.CenterCrop(32),  # or RandomCrop for more augmentation
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+                ),  # Scale to [-1, 1]
+            ]
+        )
 
     def setup(self, stage=None):
         """Setup datasets for training and validation"""
@@ -130,6 +137,8 @@ if __name__ == "__main__":
     train_loader = dm.train_dataloader()
     batch = next(iter(train_loader))
     print(f"Batch keys: {batch.keys()}")
-    print(f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}")
+    print(
+        f"Pixel values shape: {batch['pixel_values'].shape}, min: {batch['pixel_values'].min()}, max: {batch['pixel_values'].max()}"
+    )
     print(f"Labels shape: {batch['labels'].shape}")
     print(f"Labels: {batch['labels']}")

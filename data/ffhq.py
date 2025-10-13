@@ -1,5 +1,7 @@
 import os
+
 from dotenv import load_dotenv
+
 load_dotenv()
 import pytorch_lightning as pl
 import torch
@@ -38,7 +40,7 @@ class FFHQDataModule(pl.LightningDataModule):
         cache_dir=None,  # HuggingFace cache directory
         download=True,
         train_split=0.9,  # FFHQ doesn't have predefined splits
-        val_split=0.05,   # Remaining 0.05 goes to test
+        val_split=0.05,  # Remaining 0.05 goes to test
     ):
         load_dotenv()
         super().__init__()
@@ -56,27 +58,39 @@ class FFHQDataModule(pl.LightningDataModule):
         self.cache_dir = cache_dir or os.getenv("HF_DATASETS_CACHE", None)
 
         # Train transforms with data augmentation
-        self.train_transform = transforms.Compose([
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(256),
-            transforms.RandomHorizontalFlip(p=0.5),  # Common for face datasets
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
-        ])
+        self.train_transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    256, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.CenterCrop(256),
+                transforms.RandomHorizontalFlip(p=0.5),  # Common for face datasets
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+                ),  # Scale to [-1, 1]
+            ]
+        )
 
         # Val/test transforms without augmentation
-        self.eval_transform = transforms.Compose([
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(256),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])  # Scale to [-1, 1]
-        ])
+        self.eval_transform = transforms.Compose(
+            [
+                transforms.Resize(
+                    256, interpolation=transforms.InterpolationMode.BILINEAR
+                ),
+                transforms.CenterCrop(256),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    [0.5, 0.5, 0.5], [0.5, 0.5, 0.5]
+                ),  # Scale to [-1, 1]
+            ]
+        )
 
     def setup(self, stage=None):
         """Setup datasets for training, validation, and testing"""
 
         cache_dir = self.cache_dir or os.getenv("HF_DATASETS_CACHE", None)
-        
+
         # Load the FFHQ dataset
         ds = load_dataset(
             "bitmind/ffhq-256",
@@ -88,7 +102,7 @@ class FFHQDataModule(pl.LightningDataModule):
         # FFHQ typically comes as a single split, so we need to split it manually
         full_dataset = ds["train"] if "train" in ds else ds[list(ds.keys())[0]]
         total_size = len(full_dataset)
-        
+
         # Calculate split sizes
         train_size = int(self.train_split * total_size)
         val_size = int(self.val_split * total_size)
@@ -169,9 +183,13 @@ if __name__ == "__main__":
     train_batch = next(iter(train_loader))
     print(f"Train batch keys: {train_batch.keys()}")
     print(f"Train pixel values shape: {train_batch['pixel_values'].shape}")
-    print(f"Train pixel values range: [{train_batch['pixel_values'].min():.3f}, {train_batch['pixel_values'].max():.3f}]")
+    print(
+        f"Train pixel values range: [{train_batch['pixel_values'].min():.3f}, {train_batch['pixel_values'].max():.3f}]"
+    )
 
     val_batch = next(iter(val_loader))
     print(f"Val batch keys: {val_batch.keys()}")
     print(f"Val pixel values shape: {val_batch['pixel_values'].shape}")
-    print(f"Val pixel values range: [{val_batch['pixel_values'].min():.3f}, {val_batch['pixel_values'].max():.3f}]")
+    print(
+        f"Val pixel values range: [{val_batch['pixel_values'].min():.3f}, {val_batch['pixel_values'].max():.3f}]"
+    )

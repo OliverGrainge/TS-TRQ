@@ -7,7 +7,6 @@ import pytorch_lightning as pl
 import torch
 import yaml
 from dotenv import load_dotenv
-
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 
@@ -209,10 +208,12 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
-            print(f"="*100)
+            print(f"=" * 100)
             print(f"Loading stablediffusion from checkpoint: {checkpoint}")
-            print(f"="*100)
-            return StableDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+            print(f"=" * 100)
+            return StableDiffusionModule.load_from_checkpoint(
+                checkpoint, **module_config
+            )
         else:
             return StableDiffusionModule(**module_config)
     elif module_type == "latent-diffusion":
@@ -220,10 +221,12 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
-            print(f"="*100)
+            print(f"=" * 100)
             print(f"Loading diffusion from checkpoint: {checkpoint}")
-            print(f"="*100)
-            return LatentDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+            print(f"=" * 100)
+            return LatentDiffusionModule.load_from_checkpoint(
+                checkpoint, **module_config
+            )
         else:
             return LatentDiffusionModule(**module_config)
 
@@ -232,12 +235,26 @@ def get_module(module_config):
 
         checkpoint = module_config.pop("checkpoint", None)
         if checkpoint is not None:
-            print(f"="*100)
+            print(f"=" * 100)
             print(f"Loading diffusion from checkpoint: {checkpoint}")
-            print(f"="*100)
-            return PixelDiffusionModule.load_from_checkpoint(checkpoint, **module_config)
+            print(f"=" * 100)
+            return PixelDiffusionModule.load_from_checkpoint(
+                checkpoint, **module_config
+            )
         else:
             return PixelDiffusionModule(**module_config)
+    elif module_type == "diffusion":
+        from models import DiffusionModule
+
+        checkpoint = module_config.pop("checkpoint", None)
+        if checkpoint is not None:
+            print(f"=" * 100)
+            print(f"Loading diffusion from checkpoint: {checkpoint}")
+            print(f"=" * 100)
+            return DiffusionModule.load_from_checkpoint(
+                checkpoint, **module_config)
+        else:
+            return DiffusionModule(**module_config)
     else:
         raise ValueError(f"Invalid module: {module_type}")
 
@@ -276,8 +293,10 @@ def create_model_checkpoint_callback(model_checkpoint_config):
 
     # Set defaults if not provided
     config = {
-        "monitor": "val_loss",
-        "filename": model_checkpoint_config.get("filename", "{epoch:02d}-{val_loss:.2f}"),
+        "monitor": "train/val-loss",
+        "filename": model_checkpoint_config.get(
+            "filename", "{epoch:02d}-{val_loss:.2f}"
+        ),
         "mode": "min",
         **model_checkpoint_config,
     }
