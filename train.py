@@ -188,62 +188,24 @@ def print_training_start_info(datamodule, logger):
 
     # Logger info
     print_section("Logging Setup")
-    logger_type = type(logger).__name__
-    print(f"  Logger Type       : {logger_type}")
+    if logger is not None:
+        logger_type = type(logger).__name__
+        print(f"  Logger Type       : {logger_type}")
 
-    if hasattr(logger, "save_dir"):
-        print(f"  Save Directory    : {logger.save_dir}")
-    if hasattr(logger, "name"):
-        print(f"  Experiment Name   : {logger.name}")
-    if hasattr(logger, "project"):
-        print(f"  Project           : {logger.project}")
+        if hasattr(logger, "save_dir"):
+            print(f"  Save Directory    : {logger.save_dir}")
+        if hasattr(logger, "name"):
+            print(f"  Experiment Name   : {logger.name}")
+        if hasattr(logger, "project"):
+            print(f"  Project           : {logger.project}")
+    else:
+        print("  Logging disabled")
 
 
 def get_module(module_config):
     """Load and return the specified model module"""
     module_type = module_config.pop("module_type", "vit")
-
-    if module_type == "stablediffusion":
-        from models import StableDiffusionModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            print(f"=" * 100)
-            print(f"Loading stablediffusion from checkpoint: {checkpoint}")
-            print(f"=" * 100)
-            return StableDiffusionModule.load_from_checkpoint(
-                checkpoint, **module_config
-            )
-        else:
-            return StableDiffusionModule(**module_config)
-    elif module_type == "latent-diffusion":
-        from models import LatentDiffusionModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            print(f"=" * 100)
-            print(f"Loading diffusion from checkpoint: {checkpoint}")
-            print(f"=" * 100)
-            return LatentDiffusionModule.load_from_checkpoint(
-                checkpoint, **module_config
-            )
-        else:
-            return LatentDiffusionModule(**module_config)
-
-    elif module_type == "pixel-diffusion":
-        from models import PixelDiffusionModule
-
-        checkpoint = module_config.pop("checkpoint", None)
-        if checkpoint is not None:
-            print(f"=" * 100)
-            print(f"Loading diffusion from checkpoint: {checkpoint}")
-            print(f"=" * 100)
-            return PixelDiffusionModule.load_from_checkpoint(
-                checkpoint, **module_config
-            )
-        else:
-            return PixelDiffusionModule(**module_config)
-    elif module_type == "diffusion":
+    if module_type == "diffusion":
         from models import DiffusionModule
 
         checkpoint = module_config.pop("checkpoint", None)
@@ -295,7 +257,7 @@ def create_model_checkpoint_callback(model_checkpoint_config):
     config = {
         "monitor": "train/val-loss",
         "filename": model_checkpoint_config.get(
-            "filename", "{epoch:02d}-{val_loss:.2f}"
+            "filename", "{step:02d}-{train/val-loss:.2f}"
         ),
         "mode": "min",
         **model_checkpoint_config,
@@ -331,6 +293,9 @@ def create_logger(logger_config, config_dict=None):
             "name": "experiment-1"
         }
     """
+    if not logger_config:
+        return None
+        
     logger_type = logger_config.get("type", "wandb").lower()
 
     if logger_type == "wandb":
@@ -359,6 +324,15 @@ def main():
     config_dict = load_config(config_path)
     config = Config(config_dict)
 
+    # Extract config file name and project name from path
+    config_path_obj = Path(config_path)
+    config_name = config_path_obj.stem
+    project_name = config_path_obj.parent.name  # Folder containing the config file
+    
+    # Fallback to config name if project name is empty (for root-level configs)
+    if not project_name:
+        project_name = config_name
+
     # Print nicely formatted configuration
     print_config(config)
 
@@ -366,8 +340,34 @@ def main():
     module_config = getattr(config, "module_config", {})
     datamodule_config = getattr(config, "datamodule_config", {})
     train_config = getattr(config, "train_config", {})
-    model_checkpoint_config = getattr(config, "model_checkpoint_config", {})
-    logger_config = getattr(config, "logger_config", {})
+    
+    # Handle new simplified config structure
+    enable_logging = config_dict.get("logger", False)
+    enable_checkpointing = config_dict.get("checkpoint", False)
+    
+    # Generate logger config if logging is enabled
+    if enable_logging:
+        logger_config = {
+            "type": "wandb",
+            "project": project_name,
+            "name": config_name,
+            "save_dir": "logs/"
+        }
+    else:
+        logger_config = {}
+    
+    # Generate checkpoint config if checkpointing is enabled
+    if enable_checkpointing:
+        model_checkpoint_config = {
+            "dirpath": f"checkpoints/{project_name}/{config_name}/",
+            "filename": config_name,
+            "save_top_k": 1,  # Only save the best model
+            "monitor": "train/val-loss",
+            "mode": "min"
+        }
+    else:
+        model_checkpoint_config = {}
+    
     quantization_config = getattr(config, "quantization_config", {})
 
     # Load the model module
@@ -387,19 +387,32 @@ def main():
     # Create logger
     logger = create_logger(logger_config, config_dict)
 
-    # Create model checkpoint callback
-    checkpoint_callback = create_model_checkpoint_callback(model_checkpoint_config)
+    # Create model checkpoint callback only if config exists
+    callbacks = []
+    if model_checkpoint_config:
+        checkpoint_callback = create_model_checkpoint_callback(model_checkpoint_config)
+        callbacks.append(checkpoint_callback)
+        print_section("Checkpoint Configuration")
+        print(f"  Checkpointing enabled: {model_checkpoint_config.get('dirpath', 'default')}")
+        print(f"  Filename pattern: {model_checkpoint_config.get('filename', 'default')}")
+    else:
+        print_section("Checkpoint Configuration")
+        print("  Checkpointing disabled: No model_checkpoint_config found")
 
     # Print training setup information
     print_training_start_info(datamodule, logger)
 
     # Create trainer with train_config parameters
     trainer_kwargs = {
-        "callbacks": [checkpoint_callback],
-        "logger": logger,
+        "callbacks": callbacks,
         "gradient_clip_val": 1.0,
         **train_config,
     }
+    
+    # Only add logger if it exists
+    if logger is not None:
+        trainer_kwargs["logger"] = logger
+
 
     print_header("STARTING TRAINING")
     trainer = pl.Trainer(**trainer_kwargs)

@@ -33,7 +33,7 @@ class TLinear(nn.Linear):
         # Make alpha per-channel (one scalar per output channel)
         self.alpha = nn.Parameter(torch.ones(out_features, 1))
         self.thresh_ratio = thresh_ratio
-        self.norm = nn.RMSNorm(normalized_shape=in_features)
+        #self.norm = nn.RMSNorm(normalized_shape=in_features)
 
     @classmethod
     def from_linear(
@@ -65,7 +65,7 @@ class TLinear(nn.Linear):
         self.alpha.data = alpha.detach()
 
     def forward(self, x):
-        x = self.norm(x)
+        #x = self.norm(x)
         q_nograd, _, _, _ = ternary_quantize(self.weight, self.thresh_ratio)
         q = ste_hard_replace(self.weight, q_nograd)
         w_q = self.alpha * q  # Use learnable alpha

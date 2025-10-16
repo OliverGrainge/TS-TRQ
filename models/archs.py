@@ -292,6 +292,8 @@ def load_pretrained_diffusion(
                 pipeline.scheduler.config
             ),
             "vae": None,
+            "pixel_space": False,
+            "sample_size": 32,
         }
     
     elif model_id in ["google/ddpm-ema-church-256", "google/ddpm-ema-bedroom-256"]:
@@ -307,6 +309,8 @@ def load_pretrained_diffusion(
             "train_noise_scheduler": pipeline.scheduler,
             "inference_noise_scheduler": inference_scheduler,
             "vae": None,
+            "pixel_space": False, 
+            "sample_size": 256,
         }
     
     elif model_id in ["facebook/DiT-XL-2-256"]:
@@ -323,6 +327,8 @@ def load_pretrained_diffusion(
             "train_noise_scheduler": train_scheduler,
             "inference_noise_scheduler": pipeline.scheduler,
             "vae": pipeline.vae,
+            "pixel_space": False, 
+            "sample_size": 256,
         }
     
     else:

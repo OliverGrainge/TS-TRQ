@@ -1,0 +1,32 @@
+module_config: 
+    model_id: "google/ddpm-ema-bedroom-256"
+    module_type: "diffusion" 
+    learning_rate: 0.0002
+    weight_decay: 0.00
+    pixel_space: True
+    max_steps: 200000
+    warmup_steps: 5000
+    use_ema: True 
+    ema_decay: 0.999
+
+datamodule_config: 
+    dataset: "lsun-bedrooms"
+    batch_size: 2 #32
+    num_workers: 8 
+
+train_config: 
+    max_steps: 200000
+    val_check_interval: 10000
+    check_val_every_n_epoch: null
+    limit_val_batches: 400
+    accelerator: "auto" 
+    strategy: "auto"
+    precision: "bf16-mixed"
+    enable_progress_bar: True
+    gradient_clip_val: 1.0
+
+logger: True 
+checkpoint: True 
+ 
+quantization_config:
+  quant_type: "t"

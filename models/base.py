@@ -4,69 +4,18 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytorch_lightning as pl
 import torch
-import torch.nn.functional as F
-from diffusers import (
-    AutoencoderKL,
-    DDPMScheduler,
-    EulerAncestralDiscreteScheduler,
-    UNet2DModel,
-)
-from dotenv import load_dotenv
-from pytorch_lightning.loggers import WandbLogger
-from tqdm import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer
 
-from data import ImageNetDataModule
 from quant import get_all_conv2d_names, get_all_linear_names, quantize_model
 
 
-class QBaseModule(pl.LightningModule, ABC):
-    """
-    Base class for quantization-aware PyTorch Lightning modules.
-
-    This class provides common quantization functionality and requires
-    subclasses to implement model initialization and core training logic.
-    """
-
+class DiffusionBase(pl.LightningModule): 
     def __init__(self, *args, **kwargs):
-        super().__init__()
-
-        # Quantization state
-        self.is_quantized: bool = False
-        self.quant_type: Optional[str] = None
-        self.quant_kwargs: Dict[str, Any] = {}
-
-        # Model components - to be initialized by subclasses
-        self.model: Optional[torch.nn.Module] = None
-
-    @abstractmethod
-    def forward(self, *args, **kwargs) -> Any:
-        """
-        Forward pass implementation.
-        Must be implemented by subclasses.
-        """
-        pass
-
-    @abstractmethod
-    def training_step(self, batch: Any, batch_idx: int) -> torch.Tensor:
-        """
-        Training step implementation.
-        Must be implemented by subclasses.
-        """
-        pass
-
-    @abstractmethod
-    def configure_optimizers(self) -> Any:
-        """
-        Optimizer configuration.
-        Must be implemented by subclasses.
-        """
-        pass
-
-    def on_fit_start(self) -> None:
-        """Initialize model if not already done."""
-        if self.model is None:
-            self.setup_model()
+        super().__init__(*args, **kwargs)
+        self.is_quantized = False
+        self.quant_type = None
+        self.quant_kwargs = {}
+        self.model = None
+        
 
     def apply_quantization(self, quant_type: str, **quant_kwargs: Any) -> None:
         """
