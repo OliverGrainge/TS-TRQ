@@ -3,6 +3,77 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# ---------- ACTIVATION QUANTIZATION UTILITIES ----------
+def quantize_activation(x: torch.Tensor, bits: int, symmetric: bool = True, per_channel: bool = False, 
+                       channel_dim: int = 1, training: bool = True):
+    """
+    Quantize activations with specified bit width and granularity.
+    
+    Args:
+        x: Input tensor to quantize
+        bits: Number of bits for quantization (2-8)
+        symmetric: If True, use symmetric quantization; if False, use asymmetric
+        per_channel: If True, quantize per channel; if False, quantize per tensor
+        channel_dim: Dimension along which to apply per-channel quantization
+        training: Whether in training mode (affects STE behavior)
+    
+    Returns:
+        Quantized tensor with STE applied
+    """
+    if bits < 2 or bits > 8:
+        raise ValueError(f"Bit width must be between 2 and 8, got {bits}")
+    
+    if bits == 32:  # No quantization
+        return x
+    
+    # Calculate quantization levels
+    levels = 2 ** bits
+    
+    if symmetric:
+        # Symmetric quantization: range [-2^(bits-1)-1, 2^(bits-1)-1]
+        max_val = 2 ** (bits - 1) - 1
+        min_val = -max_val
+    else:
+        # Asymmetric quantization: range [0, 2^bits-1]
+        max_val = 2 ** bits - 1
+        min_val = 0
+    
+    # Calculate scale and zero point
+    if per_channel:
+        # Per-channel quantization
+        dims = list(range(x.dim()))
+        dims.remove(channel_dim)
+        x_min = x.amin(dim=dims, keepdim=True)
+        x_max = x.amax(dim=dims, keepdim=True)
+    else:
+        # Per-tensor quantization
+        x_min = x.amin()
+        x_max = x.amax()
+    
+    # Handle edge case where all values are the same
+    scale = torch.where(x_max > x_min, (x_max - x_min) / (max_val - min_val), 
+                       torch.ones_like(x_max))
+    
+    if symmetric:
+        zero_point = torch.zeros_like(scale)
+    else:
+        zero_point = torch.round(-x_min / scale + min_val)
+        zero_point = torch.clamp(zero_point, min_val, max_val)
+    
+    # Quantize
+    x_scaled = torch.round(x / scale + zero_point)
+    x_quant = torch.clamp(x_scaled, min_val, max_val)
+    
+    # Dequantize
+    x_dequant = (x_quant - zero_point) * scale
+    
+    # Apply STE (Straight-Through Estimator) during training
+    if training:
+        return x + (x_dequant - x).detach()
+    else:
+        return x_dequant
+
+
 # ---------- TERNARY QUANT WITH STE ----------
 def ternary_quantize_conv(w: torch.Tensor, thresh_ratio: float = 0.75):
     """
@@ -71,6 +142,11 @@ class TConv2d(nn.Conv2d):
         bias=True,
         padding_mode="zeros",
         thresh_ratio: float = 0.75,
+        # Activation quantization parameters
+        quantize_activations=False,
+        activation_bits=8,
+        activation_symmetric=True,
+        activation_per_channel=False,
     ):
         super().__init__(
             in_channels=in_channels,
@@ -87,9 +163,17 @@ class TConv2d(nn.Conv2d):
         self.alpha = nn.Parameter(torch.ones(out_channels, 1, 1, 1))
         self.thresh_ratio = thresh_ratio
         self.norm = ConvRMSNorm(in_channels)
+        
+        # Activation quantization parameters
+        self.quantize_activations = quantize_activations
+        self.activation_bits = activation_bits
+        self.activation_symmetric = activation_symmetric
+        self.activation_per_channel = activation_per_channel
 
     @classmethod
-    def from_conv2d(cls, conv: nn.Conv2d, thresh_ratio: float = 0.75):
+    def from_conv2d(cls, conv: nn.Conv2d, thresh_ratio: float = 0.75,
+                    quantize_activations=False, activation_bits=8, 
+                    activation_symmetric=True, activation_per_channel=False):
         """Create TConv2d from existing Conv2d layer."""
         mod = cls(
             in_channels=conv.in_channels,
@@ -102,6 +186,10 @@ class TConv2d(nn.Conv2d):
             bias=(conv.bias is not None),
             padding_mode=conv.padding_mode,
             thresh_ratio=thresh_ratio,
+            quantize_activations=quantize_activations,
+            activation_bits=activation_bits,
+            activation_symmetric=activation_symmetric,
+            activation_per_channel=activation_per_channel,
         )
         with torch.no_grad():
             mod.weight.copy_(conv.weight)
@@ -124,6 +212,17 @@ class TConv2d(nn.Conv2d):
         self.alpha.data = alpha.detach()
 
     def forward(self, x):
+        # Apply activation quantization if enabled
+        if self.quantize_activations:
+            x = quantize_activation(
+                x, 
+                bits=self.activation_bits,
+                symmetric=self.activation_symmetric,
+                per_channel=self.activation_per_channel,
+                channel_dim=1,  # Channel dimension for conv2d (N, C, H, W)
+                training=self.training
+            )
+        
         x = self.norm(x)
         # Quantize weights
         q_nograd, _, _, _ = ternary_quantize_conv(self.weight, self.thresh_ratio)
@@ -150,15 +249,26 @@ class TConv2d(nn.Conv2d):
             )
 
     def __repr__(self):
-        return (
+        repr_str = (
             f"TConv2d({self.in_channels}, {self.out_channels}, kernel_size={self.kernel_size}, "
             f"stride={self.stride}, padding={self.padding}, dilation={self.dilation}, "
-            f"groups={self.groups}, bias={self.bias is not None}, thresh_ratio={self.thresh_ratio})"
+            f"groups={self.groups}, bias={self.bias is not None}, thresh_ratio={self.thresh_ratio}"
         )
+        if self.quantize_activations:
+            repr_str += (
+                f", quantize_activations={self.quantize_activations}, "
+                f"activation_bits={self.activation_bits}, "
+                f"activation_symmetric={self.activation_symmetric}, "
+                f"activation_per_channel={self.activation_per_channel}"
+            )
+        repr_str += ")"
+        return repr_str
 
 
 # ---------- UTILITY FUNCTIONS ----------
-def replace_conv2d_with_ternary(module, thresh_ratio=0.75, skip_names=None):
+def replace_conv2d_with_ternary(module, thresh_ratio=0.75, skip_names=None,
+                                quantize_activations=False, activation_bits=8, 
+                                activation_symmetric=True, activation_per_channel=False):
     """
     Recursively replace Conv2d layers with TConv2d layers in a module.
 
@@ -166,6 +276,10 @@ def replace_conv2d_with_ternary(module, thresh_ratio=0.75, skip_names=None):
         module: PyTorch module to modify
         thresh_ratio: Threshold ratio for ternary quantization
         skip_names: Set of layer names to skip replacement
+        quantize_activations: Whether to quantize activations
+        activation_bits: Number of bits for activation quantization (2-8)
+        activation_symmetric: Whether to use symmetric activation quantization
+        activation_per_channel: Whether to use per-channel activation quantization
     """
     if skip_names is None:
         skip_names = set()
@@ -176,11 +290,17 @@ def replace_conv2d_with_ternary(module, thresh_ratio=0.75, skip_names=None):
 
         if isinstance(child, nn.Conv2d) and not isinstance(child, TConv2d):
             # Replace Conv2d with TConv2d
-            tconv = TConv2d.from_conv2d(child, thresh_ratio)
+            tconv = TConv2d.from_conv2d(
+                child, thresh_ratio, quantize_activations, activation_bits,
+                activation_symmetric, activation_per_channel
+            )
             setattr(module, name, tconv)
         else:
             # Recursively apply to child modules
-            replace_conv2d_with_ternary(child, thresh_ratio, skip_names)
+            replace_conv2d_with_ternary(
+                child, thresh_ratio, skip_names, quantize_activations, 
+                activation_bits, activation_symmetric, activation_per_channel
+            )
 
 
 if __name__ == "__main__":
@@ -301,3 +421,28 @@ if __name__ == "__main__":
         print(
             f"Model output stats - Mean: {output.mean():.4f}, Std: {output.std():.4f}"
         )
+
+    # Test activation quantization
+    print(f"\n=== Testing Activation Quantization ===")
+    
+    # Test different activation quantization configurations
+    test_configs = [
+        {"quantize_activations": False, "activation_bits": 8},
+        {"quantize_activations": True, "activation_bits": 8, "activation_symmetric": True, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": True, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": False, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": True, "activation_per_channel": True},
+    ]
+    
+    for i, config in enumerate(test_configs):
+        print(f"\nTest config {i+1}: {config}")
+        test_conv = TConv2d.from_conv2d(regular_conv, thresh_ratio=0.75, **config)
+        
+        with torch.no_grad():
+            output = test_conv(x)
+            error = (regular_output - output).abs().mean()
+        
+        print(f"  Output shape: {output.shape}")
+        print(f"  Output stats - Mean: {output.mean():.4f}, Std: {output.std():.4f}")
+        print(f"  Error vs reference: {error:.6f}")
+        print(f"  Layer repr: {test_conv}")

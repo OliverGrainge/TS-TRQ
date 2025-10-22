@@ -255,9 +255,9 @@ def create_model_checkpoint_callback(model_checkpoint_config):
 
     # Set defaults if not provided
     config = {
-        "monitor": "train/val-loss",
+        "monitor": "val/loss_ema",
         "filename": model_checkpoint_config.get(
-            "filename", "{step:02d}-{train/val-loss:.2f}"
+            "filename", "{step:02d}-{val/loss_ema:.2f}"
         ),
         "mode": "min",
         **model_checkpoint_config,
@@ -362,7 +362,7 @@ def main():
             "dirpath": f"checkpoints/{project_name}/{config_name}/",
             "filename": config_name,
             "save_top_k": 1,  # Only save the best model
-            "monitor": "train/val-loss",
+            "monitor": "val/loss_ema",
             "mode": "min"
         }
     else:
