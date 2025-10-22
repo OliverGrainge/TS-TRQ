@@ -237,55 +237,110 @@ class DiffusionModule(DiffusionBase):
         return model_pred, target
     
     def training_step(self, batch, batch_idx):
-        """Training step with proper loss calculation."""
         pixel_values = batch["pixel_values"]
         labels = batch["labels"] if "labels" in batch else None
         
-        # Normalize to [-1, 1] if needed
         if pixel_values.min() >= 0.0 and pixel_values.max() <= 1.0:
             pixel_values = pixel_values * 2.0 - 1.0
         
-        # Forward pass
-        model_pred, target = self(pixel_values, labels)
+        # Encode to latents if using VAE
+        if self.vae is not None:
+            with torch.no_grad():
+                latents = self.vae.encode(pixel_values).latent_dist.sample()
+                latents = latents * self.vae.config.scaling_factor
+        else:
+            latents = pixel_values
         
-        # Calculate loss (simple MSE for diffusion)
-        mse_loss = F.mse_loss(model_pred, target, reduction="mean")
+        # Generate noise and timesteps
+        noise = torch.randn_like(latents)
+        batch_size = latents.shape[0]
+        timesteps = torch.randint(
+            0, self.train_noise_scheduler.config.num_train_timesteps,
+            (batch_size,), device=latents.device
+        ).long()
+        
+        # Add noise
+        noisy_latents = self.train_noise_scheduler.add_noise(latents, noise, timesteps)
+        
+        # Predict
+        if self.class_conditional and labels is not None:
+            model_pred = self.model(noisy_latents, timesteps, class_labels=labels).sample
+        else:
+            model_pred = self.model(noisy_latents, timesteps).sample
+        
+        # Determine target
+        if self.train_noise_scheduler.config.prediction_type == "epsilon":
+            target = noise
+        elif self.train_noise_scheduler.config.prediction_type == "v_prediction":
+            target = self.train_noise_scheduler.get_velocity(latents, noise, timesteps)
+        else:
+            target = latents
+        
+        # *** NEW: Compute loss per spatial location ***
+        loss = F.mse_loss(model_pred, target, reduction='none')  # [B, C, H, W]
+        loss = loss.mean(dim=[1, 2, 3])  # Mean over spatial dims -> [B]
+        
+        # *** NEW: Apply timestep-dependent weighting ***
+        # Calculate LVLB weights similar to reference
+        alphas_cumprod = self.train_noise_scheduler.alphas_cumprod.to(device=latents.device)
+        alphas = self.train_noise_scheduler.alphas.to(device=latents.device)
+        betas = self.train_noise_scheduler.betas.to(device=latents.device)
+        
+        # Get posterior variance (similar to reference line 149-150)
+        alphas_cumprod_prev = F.pad(alphas_cumprod[:-1], (1, 0), value=1.0)
+        posterior_variance = betas * (1.0 - alphas_cumprod_prev) / (1.0 - alphas_cumprod)
+        
+        # Calculate LVLB weights (reference line 161-162)
+        lvlb_weights = betas ** 2 / (
+            2 * posterior_variance * alphas * (1 - alphas_cumprod)
+        )
+        lvlb_weights[0] = lvlb_weights[1]  # Fix first timestep
+        
+        # Apply weights
+        loss_simple = loss.mean()
+        loss_vlb = (lvlb_weights[timesteps] * loss).mean()
+        
+        # Combine losses (reference uses original_elbo_weight, typically 0)
+        mse_loss = loss_simple + 0.0 * loss_vlb  # Adjust weight if needed
+        
+        # Add regularization
         reg_loss = self.reg_loss(reduction="mean")
-        loss = mse_loss + reg_loss
+        total_loss = mse_loss + reg_loss
         
         # Log metrics
         self.log("train/mse-loss", mse_loss, prog_bar=True)
-        self.log("train/reg-loss", reg_loss, prog_bar=True)
-        self.log("train/train-loss", loss, prog_bar=True)
+        self.log("train/loss_vlb", loss_vlb, prog_bar=False)
+        self.log("train/reg-loss", reg_loss, prog_bar=False)
+        self.log("train/train-loss", total_loss, prog_bar=True)
         self.log_stats()
         
-        # Update EMA
-        if self.use_ema and self.global_step % 10 == 0:
+        # Update EMA every step
+        if self.use_ema:
             self.ema.update(self.model)
         
-        return loss
+        return total_loss
     
     def validation_step(self, batch, batch_idx):
-        """Validation step."""
-        # Unpack batch
+        """Validation step with EMA comparison."""
         pixel_values = batch["pixel_values"]
         labels = batch["labels"] if "labels" in batch else None
-
-
-        # Normalize to [-1, 1] if needed
+        
         if pixel_values.min() >= 0.0 and pixel_values.max() <= 1.0:
             pixel_values = pixel_values * 2.0 - 1.0
         
-        # Forward pass
+        # Evaluate without EMA
         model_pred, target = self(pixel_values, labels)
+        loss_no_ema = F.mse_loss(model_pred, target)
+        self.log("val/loss_no_ema", loss_no_ema, prog_bar=False, on_epoch=True)
         
-        # Calculate loss
-        loss = F.mse_loss(model_pred, target, reduction="mean")
-        
-        # Log metrics
-        self.log("train/val-loss", loss, prog_bar=True)
-        
-        return loss
+        # Evaluate with EMA
+        if self.use_ema:
+            self.ema.apply_shadow(self.model)
+            model_pred_ema, target_ema = self(pixel_values, labels)
+            loss_ema = F.mse_loss(model_pred_ema, target_ema)
+            self.log("val/loss_ema", loss_ema, prog_bar=True, on_epoch=True)
+            self.ema.restore(self.model)
+        return loss_no_ema
 
     def on_validation_epoch_end(self):
         """Generate and log sample images at the end of validation."""
@@ -312,7 +367,7 @@ class DiffusionModule(DiffusionBase):
             # Generate images (using fewer inference steps for speed during training)
             images = self.generate(
                 batch_size=batch_size,
-                num_inference_steps=50,  # Faster sampling during training
+                num_inference_steps=100,  # Faster sampling during training
                 class_labels=class_labels,
                 use_ema=True,
                 pbar=False,
@@ -355,7 +410,7 @@ class DiffusionModule(DiffusionBase):
             self.model.parameters(),
             lr=self.learning_rate,
             betas=(0.9, 0.999),
-            weight_decay=self.weight_decay,
+            weight_decay=0.0,
             eps=1e-8
         )
         

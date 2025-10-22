@@ -3,6 +3,77 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# ---------- ACTIVATION QUANTIZATION UTILITIES ----------
+def quantize_activation(x: torch.Tensor, bits: int, symmetric: bool = True, per_channel: bool = False, 
+                       channel_dim: int = 1, training: bool = True):
+    """
+    Quantize activations with specified bit width and granularity.
+    
+    Args:
+        x: Input tensor to quantize
+        bits: Number of bits for quantization (2-8)
+        symmetric: If True, use symmetric quantization; if False, use asymmetric
+        per_channel: If True, quantize per channel; if False, quantize per tensor
+        channel_dim: Dimension along which to apply per-channel quantization
+        training: Whether in training mode (affects STE behavior)
+    
+    Returns:
+        Quantized tensor with STE applied
+    """
+    if bits < 2 or bits > 8:
+        raise ValueError(f"Bit width must be between 2 and 8, got {bits}")
+    
+    if bits == 32:  # No quantization
+        return x
+    
+    # Calculate quantization levels
+    levels = 2 ** bits
+    
+    if symmetric:
+        # Symmetric quantization: range [-2^(bits-1)-1, 2^(bits-1)-1]
+        max_val = 2 ** (bits - 1) - 1
+        min_val = -max_val
+    else:
+        # Asymmetric quantization: range [0, 2^bits-1]
+        max_val = 2 ** bits - 1
+        min_val = 0
+    
+    # Calculate scale and zero point
+    if per_channel:
+        # Per-channel quantization
+        dims = list(range(x.dim()))
+        dims.remove(channel_dim)
+        x_min = x.amin(dim=dims, keepdim=True)
+        x_max = x.amax(dim=dims, keepdim=True)
+    else:
+        # Per-tensor quantization
+        x_min = x.amin()
+        x_max = x.amax()
+    
+    # Handle edge case where all values are the same
+    scale = torch.where(x_max > x_min, (x_max - x_min) / (max_val - min_val), 
+                       torch.ones_like(x_max))
+    
+    if symmetric:
+        zero_point = torch.zeros_like(scale)
+    else:
+        zero_point = torch.round(-x_min / scale + min_val)
+        zero_point = torch.clamp(zero_point, min_val, max_val)
+    
+    # Quantize
+    x_scaled = torch.round(x / scale + zero_point)
+    x_quant = torch.clamp(x_scaled, min_val, max_val)
+    
+    # Dequantize
+    x_dequant = (x_quant - zero_point) * scale
+    
+    # Apply STE (Straight-Through Estimator) during training
+    if training:
+        return x + (x_dequant - x).detach()
+    else:
+        return x_dequant
+
+
 # ---------- TERNARY QUANT WITH STE ----------
 def ternary_quantize(w: torch.Tensor, thresh_ratio: float = 0.75):
     abs_w = w.abs()
@@ -31,12 +102,23 @@ class TSVDLinear(nn.Linear):
         thresh_ratio=0.75,
         reg_scale=0.5,
         reg_type="l1",
+        # Activation quantization parameters
+        quantize_activations=False,
+        activation_bits=8,
+        activation_symmetric=True,
+        activation_per_channel=False,
     ):
         super().__init__(in_features, out_features, bias=bias)
         self.thresh_ratio = thresh_ratio
         self.rank = rank
         self.reg_scale = reg_scale
         self.reg_type = reg_type
+        
+        # Activation quantization parameters
+        self.quantize_activations = quantize_activations
+        self.activation_bits = activation_bits
+        self.activation_symmetric = activation_symmetric
+        self.activation_per_channel = activation_per_channel
 
         self.register_buffer("L", torch.zeros(out_features, rank))
         self.register_buffer("R", torch.zeros(rank, in_features))
@@ -50,7 +132,8 @@ class TSVDLinear(nn.Linear):
 
     @classmethod
     def from_linear(
-        cls, lin: nn.Linear, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1"
+        cls, lin: nn.Linear, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1",
+        quantize_activations=False, activation_bits=8, activation_symmetric=True, activation_per_channel=False
     ):
         mod = cls(
             lin.in_features,
@@ -60,6 +143,10 @@ class TSVDLinear(nn.Linear):
             thresh_ratio=thresh_ratio,
             reg_scale=reg_scale,
             reg_type=reg_type,
+            quantize_activations=quantize_activations,
+            activation_bits=activation_bits,
+            activation_symmetric=activation_symmetric,
+            activation_per_channel=activation_per_channel,
         )
         with torch.no_grad():
             mod.weight.copy_(lin.weight)
@@ -127,6 +214,17 @@ class TSVDLinear(nn.Linear):
         self.lr_scalars.data.fill_(1.0)
 
     def forward(self, x):
+        # Apply activation quantization if enabled
+        if self.quantize_activations:
+            x = quantize_activation(
+                x, 
+                bits=self.activation_bits,
+                symmetric=self.activation_symmetric,
+                per_channel=self.activation_per_channel,
+                channel_dim=-1,  # Last dimension for linear layers
+                training=self.training
+            )
+        
         # x = self.norm(x)
         q_nograd, _, _, _ = ternary_quantize(self.weight, self.thresh_ratio)
         q = ste_hard_replace(self.weight, q_nograd)
@@ -141,7 +239,7 @@ class TSVDLinear(nn.Linear):
         L = self.L.to(device=x.device, dtype=x.dtype)
         R = self.R.to(device=x.device, dtype=x.dtype)
 
-        if self.rank > 0 and L.numel() != 0 and R.numel() != 0:
+        if self.rank > 0 and L.numel() != 0 and R.numel() != 0 and self.training:
             E_lr = (self.lr_scalars.to(x.dtype) * L) @ R
             # Check for NaN in low-rank correction
             if not torch.isfinite(E_lr).all():
@@ -174,16 +272,25 @@ class TSVDLinear(nn.Linear):
         self._init_weights(rank=rank)
 
     def extra_repr(self):
-        return (
+        repr_str = (
             f"in_features={self.in_features}, out_features={self.out_features}, "
             f"bias={self.bias is not None}, rank={self.rank}, thresh_ratio={self.thresh_ratio}"
         )
+        if self.quantize_activations:
+            repr_str += (
+                f", quantize_activations={self.quantize_activations}, "
+                f"activation_bits={self.activation_bits}, "
+                f"activation_symmetric={self.activation_symmetric}, "
+                f"activation_per_channel={self.activation_per_channel}"
+            )
+        return repr_str
 
 
 if __name__ == "__main__":
 
     def replace_linear_with_ternary_svd(
-        module, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1", skip_names=None
+        module, rank=8, thresh_ratio=0.75, reg_scale=0.5, reg_type="l1", skip_names=None,
+        quantize_activations=False, activation_bits=8, activation_symmetric=True, activation_per_channel=False
     ):
         """
         Recursively replace Linear layers with TSVDLinear layers in a module.
@@ -195,6 +302,10 @@ if __name__ == "__main__":
             reg_scale: Regularization scale
             reg_type: Regularization type ("l1" or "l2")
             skip_names: Set of layer names to skip replacement
+            quantize_activations: Whether to quantize activations
+            activation_bits: Number of bits for activation quantization (2-8)
+            activation_symmetric: Whether to use symmetric activation quantization
+            activation_per_channel: Whether to use per-channel activation quantization
         """
         if skip_names is None:
             skip_names = set()
@@ -211,12 +322,17 @@ if __name__ == "__main__":
                     thresh_ratio=thresh_ratio,
                     reg_scale=reg_scale,
                     reg_type=reg_type,
+                    quantize_activations=quantize_activations,
+                    activation_bits=activation_bits,
+                    activation_symmetric=activation_symmetric,
+                    activation_per_channel=activation_per_channel,
                 )
                 setattr(module, name, tlinear)
             else:
                 # Recursively apply to child modules
                 replace_linear_with_ternary_svd(
-                    child, rank, thresh_ratio, reg_scale, reg_type, skip_names
+                    child, rank, thresh_ratio, reg_scale, reg_type, skip_names,
+                    quantize_activations, activation_bits, activation_symmetric, activation_per_channel
                 )
 
 
@@ -445,5 +561,30 @@ if __name__ == "__main__":
         print(
             f"  Batch size {batch_size}: Output shape {y_test.shape}, Mean {y_test.mean():.4f}"
         )
+
+    # Test activation quantization
+    print(f"\n=== Testing Activation Quantization ===")
+    
+    # Test different activation quantization configurations
+    test_configs = [
+        {"quantize_activations": False, "activation_bits": 8},
+        {"quantize_activations": True, "activation_bits": 8, "activation_symmetric": True, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": True, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": False, "activation_per_channel": False},
+        {"quantize_activations": True, "activation_bits": 4, "activation_symmetric": True, "activation_per_channel": True},
+    ]
+    
+    for i, config in enumerate(test_configs):
+        print(f"\nTest config {i+1}: {config}")
+        test_linear = TSVDLinear.from_linear(linear, rank=8, **config)
+        
+        with torch.no_grad():
+            output = test_linear(x)
+            error = (y_ref - output).abs().mean()
+        
+        print(f"  Output shape: {output.shape}")
+        print(f"  Output stats - Mean: {output.mean():.4f}, Std: {output.std():.4f}")
+        print(f"  Error vs reference: {error:.6f}")
+        print(f"  Layer repr: {test_linear}")
 
     print(f"\n=== Test Complete ===")

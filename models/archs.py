@@ -289,7 +289,7 @@ def load_pretrained_diffusion(
             "model": pipeline.unet,
             "train_noise_scheduler": pipeline.scheduler,
             "inference_noise_scheduler": DDIMScheduler.from_config(
-                pipeline.scheduler.config
+                pipeline.scheduler.config, timestep_spacing="trailing"
             ),
             "vae": None,
             "pixel_space": False,

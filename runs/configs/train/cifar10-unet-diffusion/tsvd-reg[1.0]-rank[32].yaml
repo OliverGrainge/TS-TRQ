@@ -4,10 +4,10 @@ module_config:
     learning_rate: 0.0002
     weight_decay: 0.00
     pixel_space: True
-    max_steps: 100000
-    warmup_steps: 1000
+    max_steps: 300000
+    warmup_steps: 10000
     use_ema: True 
-    ema_decay: 0.999d
+    ema_decay: 0.9999
 
 datamodule_config: 
     dataset: "cifar10"
@@ -15,10 +15,10 @@ datamodule_config:
     num_workers: 8 
 
 train_config: 
-    max_steps: 100000
-    val_check_interval: 5000
+    max_steps: 300000
+    val_check_interval: 20000
     check_val_every_n_epoch: null
-    limit_val_batches: 350
+    limit_val_batches: 500
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
@@ -26,7 +26,7 @@ train_config:
     gradient_clip_val: 0.5
 
 logger: True 
-checkpoint: True 
+checkpoint: True
 
 quantization_config:
   quant_type: "tsvd"
