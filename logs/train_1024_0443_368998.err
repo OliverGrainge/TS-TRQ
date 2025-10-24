@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "/iridisfs/home/oeg1n18/TS-TRQ/train.py", line 423, in <module>
+    main()
+  File "/iridisfs/home/oeg1n18/TS-TRQ/train.py", line 324, in main
+    config_dict = load_config(config_path)
+                  ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/iridisfs/home/oeg1n18/TS-TRQ/train.py", line 23, in load_config
+    raise FileNotFoundError(f"Config file not found: {config_path}")
+FileNotFoundError: Config file not found: runs/configs/train/cifar10-unet-diffusion/tsvd-re

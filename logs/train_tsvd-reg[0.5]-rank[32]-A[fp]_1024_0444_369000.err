@@ -1,0 +1,51 @@
+Couldn't connect to the Hub: (MaxRetryError("HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /api/models/google/ddpm-cifar10-32 (Caused by NewConnectionError('<urllib3.connection.HTTPSConnection object at 0x7f61f13a1a00>: Failed to establish a new connection: [Errno 101] Network is unreachable'))"), '(Request ID: be1caa65-d3fd-4214-ac3b-77b7f02e873b)').
+Will try to load from local cache.
+Loading pipeline components...:   0%|          | 0/2 [00:00<?, ?it/s]An error occurred while trying to fetch /scratch/oeg1n18/hf/models--google--ddpm-cifar10-32/snapshots/267b167dc01f0e4e61923ea244e8b988f84deb80: Error no file named diffusion_pytorch_model.safetensors found in directory /scratch/oeg1n18/hf/models--google--ddpm-cifar10-32/snapshots/267b167dc01f0e4e61923ea244e8b988f84deb80.
+Defaulting to unsafe serialization. Pass `allow_pickle=False` to raise an error instead.
+Loading pipeline components...:  50%|█████     | 1/2 [00:00<00:00,  7.50it/s]Loading pipeline components...: 100%|██████████| 2/2 [00:00<00:00, 13.55it/s]
+wandb: WARNING `resume` will be ignored since W&B syncing is set to `offline`. Starting a new run with run id bp497hye.
+wandb: Tracking run with wandb version 0.19.10
+wandb: W&B syncing is set to `offline` in this directory. Run `wandb online` or set WANDB_MODE=online to enable cloud syncing.
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+/home/oeg1n18/.local/lib/python3.12/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 8 worker processes in total. Our suggested max number of worker in current system is 5, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+Using bfloat16 Automatic Mixed Precision (AMP)
+GPU available: True (cuda), used: True
+TPU available: False, using: 0 TPU cores
+HPU available: False, using: 0 HPUs
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+WARNING:datasets.load:Using the latest cached version of the dataset since cifar10 couldn't be found on the Hugging Face Hub
+Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+WARNING:datasets.packaged_modules.cache.cache:Found the latest cached dataset configuration 'plain_text' at /scratch/oeg1n18/hf/cifar10/plain_text/0.0.0/0b2714987fa478483af9968de7c934580d0bb9a2 (last modified on Thu Sep  4 00:45:48 2025).
+LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
+
+  | Name  | Type        | Params | Mode
+---------------------------------------------
+0 | model | UNet2DModel | 35.8 M | eval
+---------------------------------------------
+35.8 M    Trainable params
+0         Non-trainable params
+35.8 M    Total params
+143.076   Total estimated model params size (MB)
+50        Modules in train mode
+238       Modules in eval mode
+SLURM auto-requeueing enabled. Setting signal handlers.

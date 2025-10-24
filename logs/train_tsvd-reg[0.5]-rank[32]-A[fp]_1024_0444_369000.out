@@ -1,0 +1,323 @@
+Running SLURM prolog script on coral01
+===============================================================================
+Job started on Fri Oct 24 04:44:19 BST 2025
+Job ID          : 369000
+Job name        : train_tsvd-reg[0.5]-rank[32]-A[fp]_1024_0444
+WorkDir         : /iridisfs/home/oeg1n18/TS-TRQ
+Command         : (null)
+Partition       : l40
+Num hosts       : 1
+Num cores       : 5
+Num of tasks    : 1
+Hosts allocated : coral01
+Job Output Follows ...
+===============================================================================
+
+================================================================================
+                             TRAINING CONFIGURATION                             
+================================================================================
+
+Module Config
+-------------
+  model_id                  : google/ddpm-cifar10-32
+  module_type               : diffusion
+  learning_rate             : 0.0002
+  weight_decay              : 0.0
+  pixel_space               : True
+  max_steps                 : 100000
+  warmup_steps              : 5000
+  use_ema                   : True
+  ema_decay                 : 0.9999
+
+Data Config
+-----------
+  dataset                   : cifar10
+  batch_size                : 64
+  num_workers               : 8
+
+Training Config
+---------------
+  max_steps                 : 100000
+  val_check_interval        : 5000
+  check_val_every_n_epoch   : NoneType
+  limit_val_batches         : 300
+  accelerator               : auto
+  strategy                  : auto
+  precision                 : bf16-mixed
+  enable_progress_bar       : False
+  gradient_clip_val         : 0.5
+
+Quantization Config
+-------------------
+  quant_type                : tsvd
+  reg_scale                 : 0.5
+  reg_type                  : l2
+  rank                      : 32
+  quantize_activations      : False
+Applying tsvd quantization to model with kwargs: {'reg_scale': 0.5, 'reg_type': 'l2', 'rank': 32, 'quantize_activations': False}
+Quantization applied successfully. Conv2d layers: 50, Linear layers: 0
+
+================================================================================
+                               MODEL INFORMATION                                
+================================================================================
+
+Model Details
+-------------
+  Model Type        : DiffusionModule
+  Total Parameters  : 35.77M (35,769,091)
+  Trainable Params  : 35.77M (35,769,091)
+  Device            : cpu
+  Data Type         : torch.float32
+  Quantized         : True
+  Quantization Type : tsvd
+  Learning Rate     : 0.0002
+
+Model Architecture
+------------------
+DiffusionModule(
+  (model): UNet2DModel(
+    (conv_in): Conv2d(3, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+    (time_proj): Timesteps()
+    (time_embedding): TimestepEmbedding(
+      (linear_1): Linear(in_features=128, out_features=512, bias=True)
+      (act): SiLU()
+      (linear_2): Linear(in_features=512, out_features=512, bias=True)
+    )
+    (down_blocks): ModuleList(
+      (0): DownBlock2D(
+        (resnets): ModuleList(
+          (0-1): 2 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 128, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=128, bias=True)
+            (norm2): GroupNorm(32, 128, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+          )
+        )
+        (downsamplers): ModuleList(
+          (0): Downsample2D(
+            (conv): TSVDConv2d(128, 128, kernel_size=(3, 3), stride=(2, 2), padding=(0, 0), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          )
+        )
+      )
+      (1): AttnDownBlock2D(
+        (attentions): ModuleList(
+          (0-1): 2 x Attention(
+            (group_norm): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (to_q): Linear(in_features=256, out_features=256, bias=True)
+            (to_k): Linear(in_features=256, out_features=256, bias=True)
+            (to_v): Linear(in_features=256, out_features=256, bias=True)
+            (to_out): ModuleList(
+              (0): Linear(in_features=256, out_features=256, bias=True)
+              (1): Dropout(p=0.0, inplace=False)
+            )
+          )
+        )
+        (resnets): ModuleList(
+          (0): ResnetBlock2D(
+            (norm1): GroupNorm(32, 128, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(128, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(128, 256, kernel_size=(1, 1), stride=(1, 1))
+          )
+          (1): ResnetBlock2D(
+            (norm1): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+          )
+        )
+        (downsamplers): ModuleList(
+          (0): Downsample2D(
+            (conv): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(2, 2), padding=(0, 0), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          )
+        )
+      )
+      (2): DownBlock2D(
+        (resnets): ModuleList(
+          (0-1): 2 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+          )
+        )
+        (downsamplers): ModuleList(
+          (0): Downsample2D(
+            (conv): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(2, 2), padding=(0, 0), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          )
+        )
+      )
+      (3): DownBlock2D(
+        (resnets): ModuleList(
+          (0-1): 2 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+          )
+        )
+      )
+    )
+    (up_blocks): ModuleList(
+      (0-1): 2 x UpBlock2D(
+        (resnets): ModuleList(
+          (0-2): 3 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 512, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(512, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (upsamplers): ModuleList(
+          (0): Upsample2D(
+            (conv): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          )
+        )
+      )
+      (2): AttnUpBlock2D(
+        (attentions): ModuleList(
+          (0-2): 3 x Attention(
+            (group_norm): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (to_q): Linear(in_features=256, out_features=256, bias=True)
+            (to_k): Linear(in_features=256, out_features=256, bias=True)
+            (to_v): Linear(in_features=256, out_features=256, bias=True)
+            (to_out): ModuleList(
+              (0): Linear(in_features=256, out_features=256, bias=True)
+              (1): Dropout(p=0.0, inplace=False)
+            )
+          )
+        )
+        (resnets): ModuleList(
+          (0-1): 2 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 512, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(512, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(512, 256, kernel_size=(1, 1), stride=(1, 1))
+          )
+          (2): ResnetBlock2D(
+            (norm1): GroupNorm(32, 384, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(384, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+            (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(384, 256, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+        (upsamplers): ModuleList(
+          (0): Upsample2D(
+            (conv): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          )
+        )
+      )
+      (3): UpBlock2D(
+        (resnets): ModuleList(
+          (0): ResnetBlock2D(
+            (norm1): GroupNorm(32, 384, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(384, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=128, bias=True)
+            (norm2): GroupNorm(32, 128, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(384, 128, kernel_size=(1, 1), stride=(1, 1))
+          )
+          (1-2): 2 x ResnetBlock2D(
+            (norm1): GroupNorm(32, 256, eps=1e-06, affine=True)
+            (conv1): TSVDConv2d(256, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (time_emb_proj): Linear(in_features=512, out_features=128, bias=True)
+            (norm2): GroupNorm(32, 128, eps=1e-06, affine=True)
+            (dropout): Dropout(p=0.0, inplace=False)
+            (conv2): TSVDConv2d(128, 128, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+            (nonlinearity): SiLU()
+            (conv_shortcut): Conv2d(256, 128, kernel_size=(1, 1), stride=(1, 1))
+          )
+        )
+      )
+    )
+    (mid_block): UNetMidBlock2D(
+      (attentions): ModuleList(
+        (0): Attention(
+          (group_norm): GroupNorm(32, 256, eps=1e-06, affine=True)
+          (to_q): Linear(in_features=256, out_features=256, bias=True)
+          (to_k): Linear(in_features=256, out_features=256, bias=True)
+          (to_v): Linear(in_features=256, out_features=256, bias=True)
+          (to_out): ModuleList(
+            (0): Linear(in_features=256, out_features=256, bias=True)
+            (1): Dropout(p=0.0, inplace=False)
+          )
+        )
+      )
+      (resnets): ModuleList(
+        (0-1): 2 x ResnetBlock2D(
+          (norm1): GroupNorm(32, 256, eps=1e-06, affine=True)
+          (conv1): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          (time_emb_proj): Linear(in_features=512, out_features=256, bias=True)
+          (norm2): GroupNorm(32, 256, eps=1e-06, affine=True)
+          (dropout): Dropout(p=0.0, inplace=False)
+          (conv2): TSVDConv2d(256, 256, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1), dilation=(1, 1), groups=1, bias=True, rank=32, thresh_ratio=0.75)
+          (nonlinearity): SiLU()
+        )
+      )
+    )
+    (conv_norm_out): GroupNorm(32, 128, eps=1e-06, affine=True)
+    (conv_act): SiLU()
+    (conv_out): Conv2d(128, 3, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+  )
+)
+
+Checkpoint Configuration
+------------------------
+  Checkpointing enabled: checkpoints/cifar10-unet-diffusion/tsvd-reg[0.5]-rank[32]-A[fp]/
+  Filename pattern: tsvd-reg[0.5]-rank[32]-A[fp]
+Training dataset size: 50000
+Validation dataset size: 10000
+
+================================================================================
+                                 TRAINING SETUP                                 
+================================================================================
+
+Dataset Information
+-------------------
+Training dataset size: 50000
+Validation dataset size: 10000
+  Training Samples  : 50000
+  Batch Size        : 64
+  Steps per Epoch   : 781
+
+Logging Setup
+-------------
+  Logger Type       : WandbLogger
+  Save Directory    : logs/
+  Experiment Name   : cifar10-unet-diffusion
+
+================================================================================
+                               STARTING TRAINING                                
+================================================================================
+Training dataset size: 50000
+Validation dataset size: 10000

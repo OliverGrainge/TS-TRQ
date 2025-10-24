@@ -1,0 +1,33 @@
+Running SLURM prolog script on swarmh1002
+===============================================================================
+Job started on Fri Oct 24 04:43:21 BST 2025
+Job ID          : 368998
+Job name        : train_1024_0443
+WorkDir         : /iridisfs/home/oeg1n18/TS-TRQ
+Command         : (null)
+Partition       : swarm_h100
+Num hosts       : 1
+Num cores       : 12
+Num of tasks    : 1
+Hosts allocated : swarmh1002
+Job Output Follows ...
+===============================================================================
+==============================================================================
+Running epilogue script on swarmh1002.
+
+Submit time  : 2025-10-24T04:43:20
+Start time   : 2025-10-24T04:43:21
+End time     : 2025-10-24T04:43:32
+Elapsed time : 00:00:11 (Timelimit=2-00:00:00)
+
+Job ID: 368998
+Cluster: iridis_x
+User/Group: oeg1n18/fp
+State: FAILED (exit code 1)
+Nodes: 1
+Cores per node: 12
+CPU Utilized: 00:00:07
+CPU Efficiency: 5.30% of 00:02:12 core-walltime
+Job Wall-clock time: 00:00:11
+Memory Utilized: 2.50 MB
+Memory Efficiency: 0.00% of 112.91 GB
