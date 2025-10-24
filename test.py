@@ -103,6 +103,7 @@ def save_generated_images(model, num_images: int, output_dir: str, device: torch
         generated_images = model.generate(
             batch_size=current_batch_size,
             return_pil=False,  # Return tensors
+            num_inference_steps=500,
             use_ema=True,
             pbar=False
         )
@@ -160,6 +161,14 @@ def compute_fid_score(generated_dir: str, real_dir: str) -> float:
     return fid_score
 
 
+def load_checkpoint(module, checkpoint_path): 
+    sd = torch.load(checkpoint_path)
+    weights = 'state_dict'
+    if "ema_state_dict" in sd.keys():
+        weights = "ema_state_dict"
+    
+    module.load_state_dict(sd[weights], strict=False)
+    return module
 
 def main():
     """Main test function"""
@@ -190,13 +199,16 @@ def main():
     # Load the diffusion model
     print("Loading diffusion model...")
     module = get_module(module_config)
-    module = module.load_from_checkpoint(config.checkpoint)
+    
     
     # Apply quantization if specified
     quant_type = quantization_config.pop("quant_type", None)
     if quant_type is not None:
         print(f"Applying quantization: {quant_type}")
         module.apply_quantization(quant_type=quant_type, **quantization_config)
+
+
+    module = load_checkpoint(module, config.checkpoint)
     
     # Move model to device
     print(f"Moving model to device: {device}")

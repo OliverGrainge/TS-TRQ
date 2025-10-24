@@ -451,7 +451,7 @@ class DiffusionModule(DiffusionBase):
         self,
         height: int = None,
         width: int = None,
-        num_inference_steps: int = 50,
+        num_inference_steps: int = 100,
         generator: Optional[torch.Generator] = None,
         return_pil: bool = True,
         batch_size: int = 1,
@@ -489,11 +489,13 @@ class DiffusionModule(DiffusionBase):
         # Use EMA model if available
         if use_ema and self.ema is not None:
             self.ema.apply_shadow(self.model)
+
         
         try:
             # Set up scheduler
             scheduler = self.inference_noise_scheduler or self.train_noise_scheduler
             scheduler.set_timesteps(num_inference_steps, device=device)
+            
             
             # Determine latent size for VAE models
             if self.vae is not None:
@@ -594,4 +596,13 @@ class DiffusionModule(DiffusionBase):
             "to_out",  # Attention output projections
         ]
 
+    def on_save_checkpoint(self, checkpoint):
+        """Save EMA weights to checkpoint."""
+        if hasattr(self, 'ema') and self.ema is not None:
+            # Add EMA shadow parameters to the checkpoint
+            ema_state = {}
+            for name, shadow_param in self.ema.shadow.items():
+                ema_state[name] = shadow_param.clone().detach()  # Remove "model." prefix
+            checkpoint['ema_state_dict'] = ema_state
+            print(f"Saved {len(ema_state)} EMA parameters to checkpoint")
    
