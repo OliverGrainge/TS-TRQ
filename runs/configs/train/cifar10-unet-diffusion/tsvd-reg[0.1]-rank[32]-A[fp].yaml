@@ -22,7 +22,7 @@ train_config:
     accelerator: "auto" 
     strategy: "auto"
     precision: "bf16-mixed"
-    enable_progress_bar: True
+    enable_progress_bar: False
     gradient_clip_val: 0.5
 
 logger: True 

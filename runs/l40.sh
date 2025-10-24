@@ -17,7 +17,7 @@ NODES=1
 NTASKS=1
 GPUS=1
 CPUS=5
-TIME="10:00:00"
+TIME="23:00:00"
 PARTITION="l40"
 
 # Generate job name from script name with timestamp and optional config info

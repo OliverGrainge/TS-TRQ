@@ -6,7 +6,12 @@ Usage:
 """
 
 import os
+<<<<<<< Updated upstream
 
+=======
+from dotenv import load_dotenv
+load_dotenv()
+>>>>>>> Stashed changes
 from datasets import DownloadConfig, load_dataset
 from dotenv import load_dotenv
 from huggingface_hub.constants import HF_HOME, HF_HUB_CACHE
