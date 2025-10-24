@@ -190,6 +190,7 @@ def main():
     # Load the diffusion model
     print("Loading diffusion model...")
     module = get_module(module_config)
+    module = module.load_from_checkpoint(config.checkpoint)
     
     # Apply quantization if specified
     quant_type = quantization_config.pop("quant_type", None)
@@ -215,8 +216,8 @@ def main():
     datamodule = get_datamodule(datamodule_config)
     
     # Create simple output directories
-    generated_dir = Path("/tmp/generated")
-    real_dir = Path("/tmp/real")
+    generated_dir = Path("tmp/generated")
+    real_dir = Path("tmp/real")
     os.makedirs(generated_dir, exist_ok=True)
     os.makedirs(real_dir, exist_ok=True)
     

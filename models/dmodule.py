@@ -594,43 +594,4 @@ class DiffusionModule(DiffusionBase):
             "to_out",  # Attention output projections
         ]
 
-    def on_save_checkpoint(self, checkpoint: dict) -> None:
-        """
-        Custom checkpoint saving to store EMA shadow weights instead of regular model weights.
-        This ensures that when loading the checkpoint, we get the EMA-averaged model.
-        """
-        if self.use_ema and self.ema is not None:
-            # Apply EMA shadow weights to model temporarily
-            self.ema.apply_shadow(self.model)
-            
-            # Save the model state with EMA weights
-            checkpoint['state_dict'] = self.state_dict()
-            
-            # Restore original model weights
-            self.ema.restore(self.model)
-            
-            # Also save EMA state for completeness
-            checkpoint['ema_state'] = {
-                'shadow': self.ema.shadow,
-                'decay': self.ema.decay
-            }
-        else:
-            # If no EMA, use default behavior
-            checkpoint['state_dict'] = self.state_dict()
-
-    def on_load_checkpoint(self, checkpoint: dict) -> None:
-        """
-        Custom checkpoint loading to handle EMA shadow weights.
-        The checkpoint should contain EMA weights in the state_dict.
-        """
-        if self.use_ema and self.ema is not None and 'ema_state' in checkpoint:
-            # Load the model with EMA weights (they should already be in state_dict)
-            self.load_state_dict(checkpoint['state_dict'])
-            
-            # Restore EMA state if available
-            ema_state = checkpoint['ema_state']
-            self.ema.shadow = ema_state['shadow']
-            self.ema.decay = ema_state['decay']
-        else:
-            # Default loading behavior
-            self.load_state_dict(checkpoint['state_dict'])
+   
