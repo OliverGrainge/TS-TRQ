@@ -1,4 +1,4 @@
-checkpoint: "checkpoints/cifar10-unet-diffusion/tsvd-reg[0.5]-rank[32]-A[32]-ema/tsvd-reg[0.5]-rank[32]-A[32]-ema.ckpt"
+checkpoint: "checkpoints/cifar10-unet-diffusion/tsvd-reg[0.5]-rank[32]-A[32]-ema/tsvd-reg[0.5]-rank[32]-A[32]-ema-v4.ckpt"
 num_images: 1000
 image_size: 
   - 32 

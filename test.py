@@ -69,7 +69,7 @@ def save_tensor_as_image(tensor: torch.Tensor, filepath: str) -> None:
     
     # Handle CIFAR-10 normalization: images are normalized to [-1, 1] range
     # Convert from [-1, 1] to [0, 1] range
-    tensor = (tensor + 1) / 2
+    #tensor = (tensor + 1) / 2
     tensor = torch.clamp(tensor, 0, 1)
     
     # Convert to PIL Image
@@ -103,12 +103,14 @@ def save_generated_images(model, num_images: int, output_dir: str, device: torch
         generated_images = model.generate(
             batch_size=current_batch_size,
             return_pil=False,  # Return tensors
-            num_inference_steps=500,
-            use_ema=True,
+            num_inference_steps=100,
+            use_ema=False,
             pbar=False
         )
         
         # Save each image in the batch
+        print("=====" * 100, generated_images.min(), generated_images.max(), print(generated_images.shape))
+        print(generated_images.shape)
         for i in range(current_batch_size):
             image_idx = batch_idx * batch_size + i
             filepath = os.path.join(output_dir, f"{image_idx}.png")
@@ -165,9 +167,16 @@ def load_checkpoint(module, checkpoint_path):
     sd = torch.load(checkpoint_path)
     weights = 'state_dict'
     if "ema_state_dict" in sd.keys():
+        print("==============" * 10, "loading ema weights")
+
         weights = "ema_state_dict"
+        sd = sd[weights]
+        new_sd = {}
+        new_sd = {"model." + k: v for k, v in sd.items()}
+        module.load_state_dict(new_sd, strict=False)
     
-    module.load_state_dict(sd[weights], strict=False)
+    #module.load_state_dict(sd[weights], strict=True)
+    print("==============" * 10, "loaded weights")
     return module
 
 def main():

@@ -49,3 +49,4 @@ LOCAL_RANK: 0 - CUDA_VISIBLE_DEVICES: [0]
 50        Modules in train mode
 238       Modules in eval mode
 SLURM auto-requeueing enabled. Setting signal handlers.
+slurmstepd-coral01: error: *** JOB 369000 ON coral01 CANCELLED AT 2025-10-24T07:04:02 ***

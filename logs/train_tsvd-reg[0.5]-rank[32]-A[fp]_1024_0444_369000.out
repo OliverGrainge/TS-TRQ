@@ -321,3 +321,23 @@ Logging Setup
 ================================================================================
 Training dataset size: 50000
 Validation dataset size: 10000
+==============================================================================
+Running epilogue script on coral01.
+
+Submit time  : 2025-10-24T04:44:18
+Start time   : 2025-10-24T04:44:19
+End time     : 2025-10-24T07:04:02
+Elapsed time : 02:19:43 (Timelimit=23:00:00)
+
+Job ID: 369000
+Cluster: iridis_x
+User/Group: oeg1n18/fp
+State: CANCELLED (exit code 0)
+Nodes: 1
+Cores per node: 5
+CPU Utilized: 00:00:00
+CPU Efficiency: 0.00% of 11:38:35 core-walltime
+Job Wall-clock time: 02:19:43
+Memory Utilized: 25.09 GB
+Memory Efficiency: 35.43% of 70.80 GB
+
