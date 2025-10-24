@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List
 import argparse
+from datetime import datetime
 
 import torch
 import torchvision.transforms as transforms
@@ -61,15 +62,14 @@ def load_config(config_path: str) -> Dict[str, Any]:
 
 
 def save_tensor_as_image(tensor: torch.Tensor, filepath: str) -> None:
-    """Save a tensor as an image file"""
+    """Save a tensor as an image file, handling CIFAR-10 transforms properly"""
     # Move tensor to CPU if it's on GPU
     if tensor.is_cuda:
         tensor = tensor.cpu()
     
-    # Ensure tensor is in [0, 1] range and convert to PIL
-    if tensor.min() < 0:
-        tensor = (tensor + 1) / 2  # Denormalize from [-1, 1] to [0, 1]
-    
+    # Handle CIFAR-10 normalization: images are normalized to [-1, 1] range
+    # Convert from [-1, 1] to [0, 1] range
+    tensor = (tensor + 1) / 2
     tensor = torch.clamp(tensor, 0, 1)
     
     # Convert to PIL Image
@@ -110,7 +110,7 @@ def save_generated_images(model, num_images: int, output_dir: str, device: torch
         # Save each image in the batch
         for i in range(current_batch_size):
             image_idx = batch_idx * batch_size + i
-            filepath = os.path.join(output_dir, f"generated_{image_idx:06d}.png")
+            filepath = os.path.join(output_dir, f"{image_idx}.png")
             save_tensor_as_image(generated_images[i], filepath)
         
         # Clear GPU cache after each batch to manage memory
@@ -142,7 +142,7 @@ def save_real_images(datamodule, num_images: int, output_dir: str, device: torch
         # Save each image in the batch
         for i in range(min(batch_size, num_images - image_count)):
             image_idx = image_count + i
-            filepath = os.path.join(output_dir, f"real_{image_idx:06d}.png")
+            filepath = os.path.join(output_dir, f"{image_idx}.png")
             save_tensor_as_image(pixel_values[i], filepath)
         
         image_count += batch_size
@@ -163,12 +163,12 @@ def compute_fid_score(generated_dir: str, real_dir: str) -> float:
 
 def main():
     """Main test function"""
-    if len(sys.argv) != 2:
-        print("Usage: python test.py <config.yaml>")
-        print("Example: python test.py runs/configs/test/cifar10-unet-diffusion/tsvd-reg[0.5]-rank[32]-A[fp].yaml")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Test script for diffusion model evaluation with FID computation")
+    parser.add_argument("config", help="Path to configuration YAML file")
+    parser.add_argument("--num-images", type=int, default=1000, help="Number of images to generate (default: 1000)")
     
-    config_path = sys.argv[1]
+    args = parser.parse_args()
+    config_path = args.config
     
     # Get device (GPU if available, otherwise CPU)
     device = get_device()
@@ -183,8 +183,8 @@ def main():
     datamodule_config = getattr(config, "datamodule_config", {})
     quantization_config = getattr(config, "quantization_config", {})
     
-    # Get number of images to generate
-    num_images = getattr(config, "num_images", 1000)
+    # Get number of images to generate (CLI argument takes precedence)
+    num_images = args.num_images
     print(f"Number of images to generate: {num_images}")
     
     # Load the diffusion model
@@ -214,48 +214,38 @@ def main():
     print("Loading data module...")
     datamodule = get_datamodule(datamodule_config)
     
-    # Create temporary directory for images
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        generated_dir = temp_path / "generated"
-        real_dir = temp_path / "real"
-        
-        print(f"Using temporary directory: {temp_path}")
-        
-        # Generate images
-        save_generated_images(module, num_images, str(generated_dir), device)
-        clear_gpu_cache()  # Clear GPU cache after generation
-        
-        # Save real images
-        save_real_images(datamodule, num_images, str(real_dir), device)
-        clear_gpu_cache()  # Clear GPU cache after processing real images
-        
-        # Compute FID score
-        print("Computing FID score...")
-        fid_score = compute_fid_score(str(generated_dir), str(real_dir))
-        
-        if fid_score >= 0:
-            print(f"\n{'='*50}")
-            print(f"FID Score: {fid_score:.4f}")
-            print(f"{'='*50}")
-        else:
-            print("Failed to compute FID score")
-        
-        # Optionally save images to permanent location
-        save_permanent = input("\nSave images to permanent location? (y/n): ").lower().strip() == 'y'
-        if save_permanent:
-            permanent_dir = Path("test_output")
-            permanent_dir.mkdir(exist_ok=True)
-            
-            # Copy generated images
-            generated_permanent = permanent_dir / "generated"
-            shutil.copytree(generated_dir, generated_permanent, dirs_exist_ok=True)
-            print(f"Generated images saved to: {generated_permanent}")
-            
-            # Copy real images
-            real_permanent = permanent_dir / "real"
-            shutil.copytree(real_dir, real_permanent, dirs_exist_ok=True)
-            print(f"Real images saved to: {real_permanent}")
+    # Create simple output directories
+    generated_dir = Path("/tmp/generated")
+    real_dir = Path("/tmp/real")
+    os.makedirs(generated_dir, exist_ok=True)
+    os.makedirs(real_dir, exist_ok=True)
+    
+    
+    print(f"Generated images will be saved to: {generated_dir}")
+    print(f"Real images will be saved to: {real_dir}")
+    
+    # Generate images
+    save_generated_images(module, num_images, str(generated_dir), device)
+    clear_gpu_cache()  # Clear GPU cache after generation
+    
+    # Save real images
+    save_real_images(datamodule, num_images, str(real_dir), device)
+    clear_gpu_cache()  # Clear GPU cache after processing real images
+    
+    # Compute FID score
+    print("Computing FID score...")
+    fid_score = compute_fid_score(str(generated_dir), str(real_dir))
+    
+    if fid_score >= 0:
+        print(f"\n{'='*50}")
+        print(f"FID Score: {fid_score:.4f}")
+        print(f"{'='*50}")
+    else:
+        print("Failed to compute FID score")
+    
+    print(f"\nImages saved to: {Path.cwd()}")
+    print(f"Generated images: {generated_dir.absolute()}")
+    print(f"Real images: {real_dir.absolute()}")
 
 
 if __name__ == "__main__":
